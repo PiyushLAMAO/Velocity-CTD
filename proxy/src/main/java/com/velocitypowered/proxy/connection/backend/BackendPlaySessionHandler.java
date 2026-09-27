@@ -55,6 +55,7 @@ import com.velocitypowered.proxy.protocol.packet.HeaderAndFooterPacket;
 import com.velocitypowered.proxy.protocol.packet.JoinGamePacket;
 import com.velocitypowered.proxy.protocol.packet.KeepAlivePacket;
 import com.velocitypowered.proxy.protocol.packet.LegacyPlayerListItemPacket;
+import com.velocitypowered.proxy.protocol.packet.ObjectivePacket;
 import com.velocitypowered.proxy.protocol.packet.PluginMessagePacket;
 import com.velocitypowered.proxy.protocol.packet.RemovePlayerInfoPacket;
 import com.velocitypowered.proxy.protocol.packet.RemoveResourcePackPacket;
@@ -62,6 +63,7 @@ import com.velocitypowered.proxy.protocol.packet.ResourcePackRequestPacket;
 import com.velocitypowered.proxy.protocol.packet.ResourcePackResponsePacket;
 import com.velocitypowered.proxy.protocol.packet.ServerDataPacket;
 import com.velocitypowered.proxy.protocol.packet.TabCompleteResponsePacket;
+import com.velocitypowered.proxy.protocol.packet.TeamPacket;
 import com.velocitypowered.proxy.protocol.packet.TransferPacket;
 import com.velocitypowered.proxy.protocol.packet.UpsertPlayerInfoPacket;
 import com.velocitypowered.proxy.protocol.packet.chat.ComponentHolder;
@@ -193,12 +195,32 @@ public class BackendPlaySessionHandler implements MinecraftSessionHandler {
 
   @Override
   public boolean handle(BossBarPacket packet) {
-    if (serverConn.getPlayer().getProtocolVersion().lessThan(ProtocolVersion.MINECRAFT_1_20_2)) {
-      if (packet.getAction() == BossBarPacket.ADD) {
-        playerSessionHandler.getServerBossBars().add(packet.getUuid());
-      } else if (packet.getAction() == BossBarPacket.REMOVE) {
-        playerSessionHandler.getServerBossBars().remove(packet.getUuid());
-      }
+    if (packet.getAction() == BossBarPacket.ADD) {
+      playerSessionHandler.getServerBossBars().add(packet.getUuid());
+    } else if (packet.getAction() == BossBarPacket.REMOVE) {
+      playerSessionHandler.getServerBossBars().remove(packet.getUuid());
+    }
+
+    return false; // Forward
+  }
+
+  @Override
+  public boolean handle(ObjectivePacket packet) {
+    if (packet.getAction() == ObjectivePacket.ADD) {
+      playerSessionHandler.getServerObjectives().add(packet.getName());
+    } else if (packet.getAction() == ObjectivePacket.REMOVE) {
+      playerSessionHandler.getServerObjectives().remove(packet.getName());
+    }
+
+    return false; // Forward
+  }
+
+  @Override
+  public boolean handle(TeamPacket packet) {
+    if (packet.getMode() == TeamPacket.ADD) {
+      playerSessionHandler.getServerTeams().add(packet.getName());
+    } else if (packet.getMode() == TeamPacket.REMOVE) {
+      playerSessionHandler.getServerTeams().remove(packet.getName());
     }
     return false; // forward
   }

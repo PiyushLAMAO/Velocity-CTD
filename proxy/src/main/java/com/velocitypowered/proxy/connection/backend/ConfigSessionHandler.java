@@ -17,6 +17,7 @@
 
 package com.velocitypowered.proxy.connection.backend;
 
+import com.velocityctd.proxy.connection.fasttransition.ConfigStateSnapshot;
 import com.velocitypowered.api.event.connection.PluginMessageEvent;
 import com.velocitypowered.api.event.connection.PreTransferEvent;
 import com.velocitypowered.api.event.player.CookieRequestEvent;
@@ -24,6 +25,7 @@ import com.velocitypowered.api.event.player.CookieStoreEvent;
 import com.velocitypowered.api.event.player.PlayerResourcePackStatusEvent;
 import com.velocitypowered.api.event.player.ServerResourcePackRemoveEvent;
 import com.velocitypowered.api.event.player.ServerResourcePackSendEvent;
+import com.velocitypowered.api.event.player.configuration.PlayerBackendConfigurationEvent;
 import com.velocitypowered.api.network.ProtocolVersion;
 import com.velocitypowered.api.proxy.messages.ChannelIdentifier;
 import com.velocitypowered.api.proxy.player.ResourcePackInfo;
@@ -95,6 +97,10 @@ public class ConfigSessionHandler implements MinecraftSessionHandler {
 
   private final State state;
 
+  // Fingerprints the registry/tag data forwarded to the client, committed as its snapshot when the
+  // backend finishes, feeding the fast-transition decision.
+  private final ConfigStateSnapshot.Builder configSnapshot;
+
   // Guards advanceBackendToPlay; only touched on the backend event loop.
   private boolean backendAdvancedToPlay;
 
@@ -105,12 +111,24 @@ public class ConfigSessionHandler implements MinecraftSessionHandler {
    * @param serverConn   the server connection
    * @param resultFuture the result future
    */
-  ConfigSessionHandler(VelocityServer server, VelocityServerConnection serverConn,
-                       CompletableFuture<Impl> resultFuture) {
+  public ConfigSessionHandler(VelocityServer server, VelocityServerConnection serverConn,
+                              CompletableFuture<Impl> resultFuture) {
     this.server = server;
     this.serverConn = serverConn;
     this.resultFuture = resultFuture;
     this.state = State.START;
+    this.configSnapshot = ConfigStateSnapshot.builder("client-" + serverConn.getServerInfo().getName());
+  }
+
+  public CompletableFuture<Void> fireBackendConfigurationEvent() {
+    ConnectedPlayer player = serverConn.getPlayer();
+    return server.getEventManager().fire(new PlayerBackendConfigurationEvent(player, serverConn))
+        .handle((ignored, ex) -> {
+          if (ex != null) {
+            LOGGER.error("Error running backend configuration event for {}", player, ex);
+          }
+          return null;
+        });
   }
 
   @Override
@@ -140,6 +158,7 @@ public class ConfigSessionHandler implements MinecraftSessionHandler {
 
   @Override
   public boolean handle(TagsUpdatePacket packet) {
+    configSnapshot.addTags(packet.getTags());
     serverConn.getPlayer().getConnection().write(packet);
     return true;
   }
@@ -247,9 +266,12 @@ public class ConfigSessionHandler implements MinecraftSessionHandler {
 
   @Override
   public boolean handle(FinishedUpdatePacket packet) {
-    final MinecraftConnection smc = serverConn.ensureConnected();
-    final ConnectedPlayer player = serverConn.getPlayer();
-    final ClientConfigSessionHandler configHandler = (ClientConfigSessionHandler) player.getConnection().getActiveSessionHandler();
+    MinecraftConnection smc = serverConn.ensureConnected();
+    ConnectedPlayer player = serverConn.getPlayer();
+
+    player.setClientConfigSnapshot(configSnapshot.build());
+
+    ClientConfigSessionHandler configHandler = (ClientConfigSessionHandler) player.getConnection().getActiveSessionHandler();
 
     smc.getChannel().pipeline().get(MinecraftVarintFrameDecoder.class).setState(StateRegistry.PLAY);
     smc.getChannel().pipeline().get(MinecraftDecoder.class).setState(StateRegistry.PLAY);
@@ -343,6 +365,7 @@ public class ConfigSessionHandler implements MinecraftSessionHandler {
 
   @Override
   public boolean handle(RegistrySyncPacket packet) {
+    configSnapshot.addRegistrySync(packet.content(), serverConn.getPlayer().getProtocolVersion());
     serverConn.getPlayer().getConnection().write(packet.retain());
     return true;
   }
