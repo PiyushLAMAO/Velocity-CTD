@@ -33,19 +33,16 @@ import com.velocitypowered.proxy.connection.util.ConnectionRequestResults.Impl;
 import com.velocitypowered.proxy.protocol.MinecraftPacket;
 import com.velocitypowered.proxy.protocol.ProtocolUtils;
 import com.velocitypowered.proxy.protocol.StateRegistry;
-import com.velocitypowered.proxy.protocol.packet.ClientboundCookieRequestPacket;
-import com.velocitypowered.proxy.protocol.packet.ClientboundStoreCookiePacket;
 import com.velocitypowered.proxy.protocol.packet.DisconnectPacket;
 import com.velocitypowered.proxy.protocol.packet.KeepAlivePacket;
+import com.velocitypowered.proxy.protocol.packet.PingIdentifyPacket;
 import com.velocitypowered.proxy.protocol.packet.PluginMessagePacket;
-import com.velocitypowered.proxy.protocol.packet.RemoveResourcePackPacket;
-import com.velocitypowered.proxy.protocol.packet.ResourcePackRequestPacket;
-import com.velocitypowered.proxy.protocol.packet.TransferPacket;
-import com.velocitypowered.proxy.protocol.packet.config.CodeOfConductPacket;
+import com.velocitypowered.proxy.protocol.packet.config.ActiveFeaturesPacket;
 import com.velocitypowered.proxy.protocol.packet.config.FinishedUpdatePacket;
 import com.velocitypowered.proxy.protocol.packet.config.KnownPacksPacket;
 import com.velocitypowered.proxy.protocol.packet.config.RegistrySyncPacket;
 import com.velocitypowered.proxy.protocol.packet.config.TagsUpdatePacket;
+import com.velocitypowered.proxy.protocol.util.PluginMessageUtil;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.util.ReferenceCountUtil;
@@ -85,10 +82,6 @@ public class FastBackendConfigSessionHandler implements MinecraftSessionHandler 
   // Clientbound config packets, retained in arrival order, replayed to the client only on fallback.
   private final List<MinecraftPacket> buffered = new ArrayList<>();
 
-  // Cleared when the backend sends config packets requiring client interaction (resource packs,
-  // cookies, transfers, code of conduct), which forces the fallback reconfiguration.
-  private boolean fastTrackable = true;
-
   // Set when this handler answered the backend's known-packs offer itself, so a fallback knows the
   // backend is already satisfied and the client's response has to be dropped.
   private boolean answeredKnownPacks;
@@ -125,14 +118,15 @@ public class FastBackendConfigSessionHandler implements MinecraftSessionHandler 
     // Reply with the packs the client advertised during its initial configuration, so the backend
     // produces the same registry data the client holds; echoing the backend's own offer would be
     // unsafe if it advertises packs the client never had.
-    List<KnownPacksPacket.KnownPack> clientKnown = serverConn.getPlayer().getClientKnownPacks();
-    serverConn.ensureConnected().write(
-        clientKnown != null ? new KnownPacksPacket(clientKnown) : packet);
-    answeredKnownPacks = true;
-
-    // Buffer the offer: on fallback the client needs it to resolve the registry entries the backend
-    // omitted for known packs. The client's response is dropped so the backend isn't answered twice.
+    snapshot.addKnownPacks(packet, serverConn.ensureConnected().getProtocolVersion());
     bufferRetained(packet);
+    List<KnownPacksPacket.KnownPack> clientKnown = serverConn.getPlayer().getClientKnownPacks();
+    if (clientKnown == null) {
+      fallbackBeforeFinish("no client known-packs response is available");
+      return true;
+    }
+    serverConn.ensureConnected().write(new KnownPacksPacket(clientKnown));
+    answeredKnownPacks = true;
     return true;
   }
 
@@ -147,6 +141,28 @@ public class FastBackendConfigSessionHandler implements MinecraftSessionHandler 
   public boolean handle(TagsUpdatePacket packet) {
     snapshot.addTags(packet.getTags());
     bufferRetained(packet);
+    return true;
+  }
+
+  @Override
+  public boolean handle(ActiveFeaturesPacket packet) {
+    snapshot.addFeatures(packet, serverConn.ensureConnected().getProtocolVersion());
+    bufferRetained(packet);
+    return true;
+  }
+
+  @Override
+  public boolean handle(PingIdentifyPacket packet) {
+    serverConn.ensureConnected().write(packet);
+    return true;
+  }
+
+  @Override
+  public boolean handle(PluginMessagePacket packet) {
+    bufferRetained(packet);
+    if (!PluginMessageUtil.isMcBrand(packet)) {
+      fallbackBeforeFinish("configuration plugin message requires the client");
+    }
     return true;
   }
 
@@ -169,16 +185,32 @@ public class FastBackendConfigSessionHandler implements MinecraftSessionHandler 
 
   @Override
   public void handleGeneric(MinecraftPacket packet) {
-    if (packet instanceof ResourcePackRequestPacket
-        || packet instanceof RemoveResourcePackPacket
-        || packet instanceof ClientboundStoreCookiePacket
-        || packet instanceof ClientboundCookieRequestPacket
-        || packet instanceof TransferPacket
-        || packet instanceof CodeOfConductPacket) {
-      // Needs the client to respond in CONFIG; can't be done while it's held in PLAY.
-      fastTrackable = false;
-    }
+    // Every unclassified configuration packet may alter client state or require a response.
+    // Enter the normal CONFIG path immediately so the backend cannot stall waiting for that response.
     bufferRetained(packet);
+    fallbackBeforeFinish("unclassified configuration packet " + packet.getClass().getSimpleName());
+  }
+
+  @Override
+  public void handleUnknown(ByteBuf buf) {
+    // This packet cannot be replayed safely: its type and client-side meaning are unknown.
+    // Refuse the target connection and leave the player on the previous backend.
+    releaseBuffered();
+    serverConn.disconnect();
+    resultFuture.complete(ConnectionRequestResults.forDisconnect(
+        ConnectionMessages.INTERNAL_SERVER_CONNECTION_ERROR, serverConn.getServer()));
+  }
+
+  private void fallbackBeforeFinish(String reason) {
+    if (decided) {
+      return;
+    }
+    decided = true;
+    LOGGER.debug("Fast transition to {} fell back before backend finish: {}",
+        serverConn.getServerInfo().getName(), reason);
+    ClientPlaySessionHandler clientPlay = serverConn.getPlayer().getConnection()
+        .getActiveSessionHandler() instanceof ClientPlaySessionHandler h ? h : null;
+    fallbackReconfigure(clientPlay, false);
   }
 
   private void bufferRetained(MinecraftPacket packet) {
@@ -208,16 +240,16 @@ public class FastBackendConfigSessionHandler implements MinecraftSessionHandler 
       logSnapshotDiff(player, clientSnapshot, backendSnapshot);
     }
 
-    if (fastTrackable && compatible && clientPlay != null) {
-      LOGGER.info("Fast transition for {} to {}: switching in PLAY (compatible registries)",
+    if (compatible && clientPlay != null) {
+      LOGGER.info("Fast transition for {} to {}: switching in PLAY (compatible configuration)",
           player.getUsername(), serverConn.getServerInfo().getName());
       fastSwitch(player);
     } else {
       LOGGER.info("Fast transition for {} to {}: falling back to reconfiguration "
-              + "(fastTrackable={}, compatible={}, clientInPlay={})",
+              + "(compatible={}, clientInPlay={})",
           player.getUsername(), serverConn.getServerInfo().getName(),
-          fastTrackable, compatible, clientPlay != null);
-      fallbackReconfigure(clientPlay);
+          compatible, clientPlay != null);
+      fallbackReconfigure(clientPlay, true);
     }
   }
 
@@ -292,7 +324,7 @@ public class FastBackendConfigSessionHandler implements MinecraftSessionHandler 
    * {@link ConfigSessionHandler}, taking the client through CONFIG, and replaying the buffered
    * packets so the backend's config reaches the client exactly as it normally would.
    */
-  private void fallbackReconfigure(@Nullable ClientPlaySessionHandler clientPlay) {
+  private void fallbackReconfigure(@Nullable ClientPlaySessionHandler clientPlay, boolean backendFinished) {
     MinecraftConnection smc = serverConn.ensureConnected();
 
     if (clientPlay == null) {
@@ -322,11 +354,16 @@ public class FastBackendConfigSessionHandler implements MinecraftSessionHandler 
         replay(normal, packet);
       }
       buffered.clear();
-      replay(normal, FinishedUpdatePacket.INSTANCE);
+      if (backendFinished) {
+        replay(normal, FinishedUpdatePacket.INSTANCE);
+      }
       smc.setAutoReading(true);
     }, smc.eventLoop()).exceptionally(ex -> {
       LOGGER.error("Error falling back to reconfiguration for {}", serverConn.getPlayer().getUsername(), ex);
       releaseBuffered();
+      serverConn.disconnect();
+      resultFuture.complete(ConnectionRequestResults.forDisconnect(
+          ConnectionMessages.INTERNAL_SERVER_CONNECTION_ERROR, serverConn.getServer()));
       return null;
     });
   }

@@ -284,13 +284,13 @@ public class ConnectedPlayer implements MinecraftConnectionAssociation, Player, 
   private final @Nullable IdentifiedKey playerKey;
   private @Nullable ClientSettingsPacket clientSettingsPacket;
 
-  private @Nullable ConfigStateSnapshot clientConfigSnapshot;
+  private volatile @Nullable ConfigStateSnapshot clientConfigSnapshot;
 
-  private @Nullable List<KnownPacksPacket.KnownPack> clientKnownPacks;
+  private volatile @Nullable List<KnownPacksPacket.KnownPack> clientKnownPacks;
 
   // Set by the fast-transition fallback: the backend was already answered, so the client's next
-  // known-packs response must be dropped. Only touched on the client event loop.
-  private boolean dropKnownPacksResponseToBackend;
+  // known-packs response must be dropped. Set on the backend loop, consumed on the client loop.
+  private final AtomicBoolean dropKnownPacksResponseToBackend = new AtomicBoolean();
 
   private volatile ChatQueue chatQueue;
   private final ChatBuilderFactory chatBuilderFactory;
@@ -475,7 +475,7 @@ public class ConnectedPlayer implements MinecraftConnectionAssociation, Player, 
   }
 
   /**
-   * Returns the fingerprint of the registry/tag data the client currently holds, or {@code null}
+   * Returns the fingerprint of the configuration the client currently holds, or {@code null}
    * if the client has not yet completed a configuration.
    */
   public @Nullable ConfigStateSnapshot getClientConfigSnapshot() {
@@ -495,11 +495,11 @@ public class ConnectedPlayer implements MinecraftConnectionAssociation, Player, 
   }
 
   public void setClientKnownPacks(@Nullable List<KnownPacksPacket.KnownPack> clientKnownPacks) {
-    this.clientKnownPacks = clientKnownPacks;
+    this.clientKnownPacks = clientKnownPacks == null ? null : List.copyOf(clientKnownPacks);
   }
 
   public void setDropKnownPacksResponseToBackend(boolean drop) {
-    this.dropKnownPacksResponseToBackend = drop;
+    this.dropKnownPacksResponseToBackend.set(drop);
   }
 
   /**
@@ -507,9 +507,7 @@ public class ConnectedPlayer implements MinecraftConnectionAssociation, Player, 
    * the backend (fast-transition fallback), clearing the flag.
    */
   public boolean consumeDropKnownPacksResponseToBackend() {
-    boolean drop = this.dropKnownPacksResponseToBackend;
-    this.dropKnownPacksResponseToBackend = false;
-    return drop;
+    return this.dropKnownPacksResponseToBackend.getAndSet(false);
   }
 
   @Override

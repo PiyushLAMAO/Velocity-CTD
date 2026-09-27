@@ -18,7 +18,10 @@
 package com.velocityctd.proxy.connection.fasttransition;
 
 import com.velocitypowered.api.network.ProtocolVersion;
+import com.velocitypowered.proxy.protocol.MinecraftPacket;
 import com.velocitypowered.proxy.protocol.ProtocolUtils;
+import com.velocitypowered.proxy.protocol.packet.config.ActiveFeaturesPacket;
+import com.velocitypowered.proxy.protocol.packet.config.KnownPacksPacket;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
@@ -35,7 +38,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
 import java.util.zip.CRC32;
 import net.kyori.adventure.nbt.BinaryTag;
 import net.kyori.adventure.nbt.BinaryTagType;
@@ -66,29 +68,19 @@ public final class ConfigStateSnapshot {
    */
   private static final @Nullable String DUMP_DIR = System.getProperty("velocityctd.fasttransition.dumpDir");
 
-  private static final Set<String> IGNORED_REGISTRIES = Set.of(
-      "minecraft:chat_type",
-      "minecraft:test_environment",
-      "minecraft:test_instance");
-
-  /**
-   * Whether tag data is excluded from the fingerprint. Tag sets (block/item/etc.) commonly differ
-   * between server implementations and only affect client-side prediction, not world decoding.
-   * Override with {@code -Dvelocityctd.fasttransition.ignoreTags=false}.
-   */
-  private static final boolean IGNORE_TAGS = Boolean.parseBoolean(System.getProperty(
-      "velocityctd.fasttransition.ignoreTags", "true"));
-
   private final byte[] fingerprint;
   private final List<String> entries;
+  private final boolean complete;
 
-  private ConfigStateSnapshot(byte[] fingerprint, List<String> entries) {
+  private ConfigStateSnapshot(byte[] fingerprint, List<String> entries, boolean complete) {
     this.fingerprint = fingerprint;
     this.entries = entries;
+    this.complete = complete;
   }
 
   public boolean matches(@Nullable ConfigStateSnapshot other) {
-    return other != null && Arrays.equals(this.fingerprint, other.fingerprint);
+    return other != null && complete && other.complete
+        && Arrays.equals(this.fingerprint, other.fingerprint);
   }
 
   public List<String> entries() {
@@ -115,6 +107,8 @@ public final class ConfigStateSnapshot {
 
     private final Map<String, byte[]> registryData = new LinkedHashMap<>();
     private byte @Nullable [] tagsData;
+    private byte @Nullable [] featuresData;
+    private byte @Nullable [] knownPacksData;
     private final @Nullable String dumpLabel;
     private int seq;
 
@@ -160,6 +154,9 @@ public final class ConfigStateSnapshot {
           if (hasData) {
             canonicalizeTag(ProtocolUtils.readBinaryTag(in, version, null), out);
           }
+        }
+        if (in.isReadable()) {
+          return raw;
         }
         return ByteBufUtil.getBytes(out);
       } catch (Exception e) {
@@ -265,6 +262,26 @@ public final class ConfigStateSnapshot {
       }
     }
 
+    public void addFeatures(ActiveFeaturesPacket packet, ProtocolVersion version) {
+      featuresData = encode(packet, version);
+      dumpPayload((byte) 'F', "features", featuresData);
+    }
+
+    public void addKnownPacks(KnownPacksPacket packet, ProtocolVersion version) {
+      knownPacksData = encode(packet, version);
+      dumpPayload((byte) 'K', "known-packs", knownPacksData);
+    }
+
+    private static byte[] encode(MinecraftPacket packet, ProtocolVersion version) {
+      ByteBuf out = Unpooled.buffer();
+      try {
+        packet.encode(out, ProtocolUtils.Direction.CLIENTBOUND, version);
+        return ByteBufUtil.getBytes(out);
+      } finally {
+        out.release();
+      }
+    }
+
     private void dumpPayload(byte tag, String name, byte[] data) {
       if (DUMP_DIR == null || dumpLabel == null) {
         return;
@@ -318,19 +335,24 @@ public final class ConfigStateSnapshot {
       Collections.sort(names); // order-insensitive fingerprint
       for (String name : names) {
         byte[] data = registryData.get(name);
-        boolean ignored = IGNORED_REGISTRIES.contains(name);
-        entries.add(describe((byte) 'R', name, data, ignored));
-        if (!ignored) {
-          hashInto(digest, (byte) 'R', data);
-        }
+        entries.add(describe((byte) 'R', name, data, false));
+        hashInto(digest, (byte) 'R', data);
       }
       if (tagsData != null) {
-        entries.add(describe((byte) 'T', "tags", tagsData, IGNORE_TAGS));
-        if (!IGNORE_TAGS) {
-          hashInto(digest, (byte) 'T', tagsData);
-        }
+        entries.add(describe((byte) 'T', "tags", tagsData, false));
+        hashInto(digest, (byte) 'T', tagsData);
       }
-      return new ConfigStateSnapshot(digest.digest(), List.copyOf(entries));
+      if (featuresData != null) {
+        entries.add(describe((byte) 'F', "features", featuresData, false));
+        hashInto(digest, (byte) 'F', featuresData);
+      }
+      if (knownPacksData != null) {
+        entries.add(describe((byte) 'K', "known-packs", knownPacksData, false));
+        hashInto(digest, (byte) 'K', knownPacksData);
+      }
+      boolean complete = !registryData.isEmpty() && tagsData != null
+          && featuresData != null && knownPacksData != null;
+      return new ConfigStateSnapshot(digest.digest(), List.copyOf(entries), complete);
     }
   }
 }

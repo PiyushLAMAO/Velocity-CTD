@@ -54,10 +54,12 @@ import com.velocitypowered.proxy.protocol.packet.RemoveResourcePackPacket;
 import com.velocitypowered.proxy.protocol.packet.ResourcePackRequestPacket;
 import com.velocitypowered.proxy.protocol.packet.ResourcePackResponsePacket;
 import com.velocitypowered.proxy.protocol.packet.TransferPacket;
+import com.velocitypowered.proxy.protocol.packet.config.ActiveFeaturesPacket;
 import com.velocitypowered.proxy.protocol.packet.config.ClientboundCustomReportDetailsPacket;
 import com.velocitypowered.proxy.protocol.packet.config.ClientboundServerLinksPacket;
 import com.velocitypowered.proxy.protocol.packet.config.CodeOfConductPacket;
 import com.velocitypowered.proxy.protocol.packet.config.FinishedUpdatePacket;
+import com.velocitypowered.proxy.protocol.packet.config.KnownPacksPacket;
 import com.velocitypowered.proxy.protocol.packet.config.RegistrySyncPacket;
 import com.velocitypowered.proxy.protocol.packet.config.StartUpdatePacket;
 import com.velocitypowered.proxy.protocol.packet.config.TagsUpdatePacket;
@@ -161,6 +163,18 @@ public class ConfigSessionHandler implements MinecraftSessionHandler {
     configSnapshot.addTags(packet.getTags());
     serverConn.getPlayer().getConnection().write(packet);
     return true;
+  }
+
+  @Override
+  public boolean handle(ActiveFeaturesPacket packet) {
+    configSnapshot.addFeatures(packet, serverConn.ensureConnected().getProtocolVersion());
+    return false; // The normal CONFIG path still forwards this packet to the client.
+  }
+
+  @Override
+  public boolean handle(KnownPacksPacket packet) {
+    configSnapshot.addKnownPacks(packet, serverConn.ensureConnected().getProtocolVersion());
+    return false; // The client must answer the backend's offer itself.
   }
 
   @Override
