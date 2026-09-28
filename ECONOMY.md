@@ -1,5 +1,7 @@
 # Economy 26.3 Velocity-CTD fork
 
+For the complete change inventory, verification matrix, and upstream update procedure, read [ECONOMY_CTD_MAINTENANCE.md](ECONOMY_CTD_MAINTENANCE.md).
+
 This branch, `economy/26.3-seamless`, tracks GemstoneGG/Velocity-CTD's default branch. `origin` is `PiyushLAMAO/Velocity-CTD`; `upstream` is `GemstoneGG/Velocity-CTD`. The fast-transition implementation came from CTD pull request #1004, which upstream closed as research. The Economy changes make its comparison conservative and opt-in.
 
 Set `advanced.fast-server-switch = true` only in the isolated test proxy's `velocity.toml`. A server switch can stay in PLAY when the destination's registries (including NBT values and IDs), tags, enabled features, and known-pack offer match what the client holds. NBT compound key order and registry/tag map order do not matter. Missing state, mismatches, and unclassified configuration packets use the ordinary reconfiguration path. Unknown raw packets refuse the destination connection. The default remains `false`.
