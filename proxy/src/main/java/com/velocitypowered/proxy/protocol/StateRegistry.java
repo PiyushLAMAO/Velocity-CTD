@@ -450,7 +450,7 @@ public enum StateRegistry {
           map(0x0F, MINECRAFT_1_21_6, false),
           map(0x10, MINECRAFT_26_1, false));
 
-      // Economy lab: decode entity cleanup packets on the tested 1.21.11 and 26.3 paths.
+      // Economy lab: decode entity cleanup packets from 1.21.11 through 26.3.
       // The 26.1 mappings prevent older packet IDs from bleeding into 26.x clients.
       clientbound.register(SpawnEntityPacket.class, SpawnEntityPacket::new,
           map(0x01, MINECRAFT_1_21_9, false));

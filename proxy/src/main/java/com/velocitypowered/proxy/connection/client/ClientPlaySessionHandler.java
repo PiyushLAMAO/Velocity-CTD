@@ -850,6 +850,8 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
       VelocityServerConnection destination) {
     if (!spawned || !server.getConfiguration().isFastServerSwitch()
         || (player.getProtocolVersion() != ProtocolVersion.MINECRAFT_1_21_11
+            && player.getProtocolVersion() != ProtocolVersion.MINECRAFT_26_1
+            && player.getProtocolVersion() != ProtocolVersion.MINECRAFT_26_2
             && player.getProtocolVersion() != ProtocolVersion.MINECRAFT_26_3)
         || player.getConnection().getState() != StateRegistry.PLAY
         || player.getConnection().getType() == ConnectionTypes.LEGACY_FORGE

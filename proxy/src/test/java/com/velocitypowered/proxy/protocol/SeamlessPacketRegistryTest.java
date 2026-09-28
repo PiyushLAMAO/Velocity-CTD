@@ -36,7 +36,7 @@ import com.velocitypowered.proxy.protocol.packet.UpdateAttributesPacket;
 import org.junit.jupiter.api.Test;
 
 /**
- * Exact IDs from the local Mojang-mapped 26.3 GameProtocols.CLIENTBOUND_TEMPLATE.
+ * Versioned IDs from the CTD/Conduit registry and local Mojang-mapped 26.3 protocol.
  * A misplaced codec would otherwise corrupt ordinary play packets for every client.
  */
 class SeamlessPacketRegistryTest {
@@ -56,6 +56,29 @@ class SeamlessPacketRegistryTest {
     assertEquals(0x63, registry.getPacketId(new EntityVelocityPacket()));
     assertEquals(0x81, registry.getPacketId(new UpdateAttributesPacket()));
     assertEquals(0x82, registry.getPacketId(new EntityEffectPacket()));
+  }
+
+  @Test
+  void versions26_1And26_2UseSharedEntityAndGameEventIds() {
+    assertEquals(ProtocolVersion.MINECRAFT_26_1, ProtocolVersion.getVersionByName("26.1"));
+    assertEquals(ProtocolVersion.MINECRAFT_26_1, ProtocolVersion.getVersionByName("26.1.1"));
+    assertEquals(ProtocolVersion.MINECRAFT_26_1, ProtocolVersion.getVersionByName("26.1.2"));
+    for (ProtocolVersion version : new ProtocolVersion[]{
+        ProtocolVersion.MINECRAFT_26_1, ProtocolVersion.MINECRAFT_26_2}) {
+      var registry = StateRegistry.PLAY.getProtocolRegistry(Direction.CLIENTBOUND, version);
+      assertEquals(0x01, registry.getPacketId(new SpawnEntityPacket()));
+      assertEquals(0x02, registry.getPacketId(new EntityAnimationPacket()));
+      assertEquals(0x19, registry.getPacketId(new DamageEventPacket()));
+      assertEquals(0x22, registry.getPacketId(new EntityEventPacket()));
+      assertEquals(0x26, registry.getPacketId(new GameEventPacket()));
+      assertEquals(0x2A, registry.getPacketId(new HurtAnimationPacket()));
+      assertEquals(0x4D, registry.getPacketId(new RemoveEntitiesPacket()));
+      assertEquals(0x4E, registry.getPacketId(new RemoveEntityEffectPacket()));
+      assertEquals(0x63, registry.getPacketId(new EntityMetadataPacket()));
+      assertEquals(0x65, registry.getPacketId(new EntityVelocityPacket()));
+      assertEquals(0x83, registry.getPacketId(new UpdateAttributesPacket()));
+      assertEquals(0x84, registry.getPacketId(new EntityEffectPacket()));
+    }
   }
 
   @Test
