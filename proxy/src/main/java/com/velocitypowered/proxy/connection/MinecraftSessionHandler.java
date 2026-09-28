@@ -27,13 +27,22 @@ import com.velocitypowered.proxy.protocol.packet.ClientboundPostEffectsPacket;
 import com.velocitypowered.proxy.protocol.packet.ClientboundSoundEntityPacket;
 import com.velocitypowered.proxy.protocol.packet.ClientboundStopSoundPacket;
 import com.velocitypowered.proxy.protocol.packet.ClientboundStoreCookiePacket;
+import com.velocitypowered.proxy.protocol.packet.DamageEventPacket;
 import com.velocitypowered.proxy.protocol.packet.DialogClearPacket;
 import com.velocitypowered.proxy.protocol.packet.DialogShowPacket;
 import com.velocitypowered.proxy.protocol.packet.DisconnectPacket;
 import com.velocitypowered.proxy.protocol.packet.EncryptionRequestPacket;
 import com.velocitypowered.proxy.protocol.packet.EncryptionResponsePacket;
+import com.velocitypowered.proxy.protocol.packet.EntityAnimationPacket;
+import com.velocitypowered.proxy.protocol.packet.EntityEffectPacket;
+import com.velocitypowered.proxy.protocol.packet.EntityEventPacket;
+import com.velocitypowered.proxy.protocol.packet.EntityIdPayloadPacket;
+import com.velocitypowered.proxy.protocol.packet.EntityMetadataPacket;
+import com.velocitypowered.proxy.protocol.packet.EntityVelocityPacket;
+import com.velocitypowered.proxy.protocol.packet.GameEventPacket;
 import com.velocitypowered.proxy.protocol.packet.HandshakePacket;
 import com.velocitypowered.proxy.protocol.packet.HeaderAndFooterPacket;
+import com.velocitypowered.proxy.protocol.packet.HurtAnimationPacket;
 import com.velocitypowered.proxy.protocol.packet.JoinGamePacket;
 import com.velocitypowered.proxy.protocol.packet.KeepAlivePacket;
 import com.velocitypowered.proxy.protocol.packet.LegacyHandshakePacket;
@@ -45,6 +54,8 @@ import com.velocitypowered.proxy.protocol.packet.LoginPluginResponsePacket;
 import com.velocitypowered.proxy.protocol.packet.ObjectivePacket;
 import com.velocitypowered.proxy.protocol.packet.PingIdentifyPacket;
 import com.velocitypowered.proxy.protocol.packet.PluginMessagePacket;
+import com.velocitypowered.proxy.protocol.packet.RemoveEntitiesPacket;
+import com.velocitypowered.proxy.protocol.packet.RemoveEntityEffectPacket;
 import com.velocitypowered.proxy.protocol.packet.RemovePlayerInfoPacket;
 import com.velocitypowered.proxy.protocol.packet.RemoveResourcePackPacket;
 import com.velocitypowered.proxy.protocol.packet.ResourcePackRequestPacket;
@@ -57,6 +68,7 @@ import com.velocitypowered.proxy.protocol.packet.ServerboundCookieResponsePacket
 import com.velocitypowered.proxy.protocol.packet.ServerboundCustomClickActionPacket;
 import com.velocitypowered.proxy.protocol.packet.ServerboundPlayerLoadedPacket;
 import com.velocitypowered.proxy.protocol.packet.SetCompressionPacket;
+import com.velocitypowered.proxy.protocol.packet.SpawnEntityPacket;
 import com.velocitypowered.proxy.protocol.packet.StatusPingPacket;
 import com.velocitypowered.proxy.protocol.packet.StatusRequestPacket;
 import com.velocitypowered.proxy.protocol.packet.StatusResponsePacket;
@@ -64,6 +76,7 @@ import com.velocitypowered.proxy.protocol.packet.TabCompleteRequestPacket;
 import com.velocitypowered.proxy.protocol.packet.TabCompleteResponsePacket;
 import com.velocitypowered.proxy.protocol.packet.TeamPacket;
 import com.velocitypowered.proxy.protocol.packet.TransferPacket;
+import com.velocitypowered.proxy.protocol.packet.UpdateAttributesPacket;
 import com.velocitypowered.proxy.protocol.packet.UpsertPlayerInfoPacket;
 import com.velocitypowered.proxy.protocol.packet.chat.ChatAcknowledgementPacket;
 import com.velocitypowered.proxy.protocol.packet.chat.PlayerChatCompletionPacket;
@@ -197,6 +210,58 @@ public interface MinecraftSessionHandler {
   }
 
   default boolean handle(PluginMessagePacket packet) {
+    return false;
+  }
+
+  default boolean handle(SpawnEntityPacket packet) {
+    return false;
+  }
+
+  default boolean handle(EntityAnimationPacket packet) {
+    return false;
+  }
+
+  default boolean handle(DamageEventPacket packet) {
+    return false;
+  }
+
+  default boolean handle(EntityEventPacket packet) {
+    return false;
+  }
+
+  default boolean handle(GameEventPacket packet) {
+    return false;
+  }
+
+  default boolean handle(HurtAnimationPacket packet) {
+    return false;
+  }
+
+  default boolean handle(RemoveEntitiesPacket packet) {
+    return false;
+  }
+
+  default boolean handle(RemoveEntityEffectPacket packet) {
+    return false;
+  }
+
+  default boolean handle(EntityMetadataPacket packet) {
+    return false;
+  }
+
+  default boolean handle(EntityVelocityPacket packet) {
+    return false;
+  }
+
+  default boolean handle(UpdateAttributesPacket packet) {
+    return false;
+  }
+
+  default boolean handle(EntityEffectPacket packet) {
+    return false;
+  }
+
+  default boolean handle(EntityIdPayloadPacket packet) {
     return false;
   }
 

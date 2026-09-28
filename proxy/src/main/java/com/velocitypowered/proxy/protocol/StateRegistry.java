@@ -66,13 +66,21 @@ import com.velocitypowered.proxy.protocol.packet.ClientboundPostEffectsPacket;
 import com.velocitypowered.proxy.protocol.packet.ClientboundSoundEntityPacket;
 import com.velocitypowered.proxy.protocol.packet.ClientboundStopSoundPacket;
 import com.velocitypowered.proxy.protocol.packet.ClientboundStoreCookiePacket;
+import com.velocitypowered.proxy.protocol.packet.DamageEventPacket;
 import com.velocitypowered.proxy.protocol.packet.DialogClearPacket;
 import com.velocitypowered.proxy.protocol.packet.DialogShowPacket;
 import com.velocitypowered.proxy.protocol.packet.DisconnectPacket;
 import com.velocitypowered.proxy.protocol.packet.EncryptionRequestPacket;
 import com.velocitypowered.proxy.protocol.packet.EncryptionResponsePacket;
+import com.velocitypowered.proxy.protocol.packet.EntityAnimationPacket;
+import com.velocitypowered.proxy.protocol.packet.EntityEffectPacket;
+import com.velocitypowered.proxy.protocol.packet.EntityEventPacket;
+import com.velocitypowered.proxy.protocol.packet.EntityMetadataPacket;
+import com.velocitypowered.proxy.protocol.packet.EntityVelocityPacket;
+import com.velocitypowered.proxy.protocol.packet.GameEventPacket;
 import com.velocitypowered.proxy.protocol.packet.HandshakePacket;
 import com.velocitypowered.proxy.protocol.packet.HeaderAndFooterPacket;
+import com.velocitypowered.proxy.protocol.packet.HurtAnimationPacket;
 import com.velocitypowered.proxy.protocol.packet.JoinGamePacket;
 import com.velocitypowered.proxy.protocol.packet.KeepAlivePacket;
 import com.velocitypowered.proxy.protocol.packet.LegacyPlayerListItemPacket;
@@ -82,6 +90,8 @@ import com.velocitypowered.proxy.protocol.packet.LoginPluginResponsePacket;
 import com.velocitypowered.proxy.protocol.packet.ObjectivePacket;
 import com.velocitypowered.proxy.protocol.packet.PingIdentifyPacket;
 import com.velocitypowered.proxy.protocol.packet.PluginMessagePacket;
+import com.velocitypowered.proxy.protocol.packet.RemoveEntitiesPacket;
+import com.velocitypowered.proxy.protocol.packet.RemoveEntityEffectPacket;
 import com.velocitypowered.proxy.protocol.packet.RemovePlayerInfoPacket;
 import com.velocitypowered.proxy.protocol.packet.RemoveResourcePackPacket;
 import com.velocitypowered.proxy.protocol.packet.ResourcePackRequestPacket;
@@ -94,6 +104,7 @@ import com.velocitypowered.proxy.protocol.packet.ServerboundCookieResponsePacket
 import com.velocitypowered.proxy.protocol.packet.ServerboundCustomClickActionPacket;
 import com.velocitypowered.proxy.protocol.packet.ServerboundPlayerLoadedPacket;
 import com.velocitypowered.proxy.protocol.packet.SetCompressionPacket;
+import com.velocitypowered.proxy.protocol.packet.SpawnEntityPacket;
 import com.velocitypowered.proxy.protocol.packet.StatusPingPacket;
 import com.velocitypowered.proxy.protocol.packet.StatusRequestPacket;
 import com.velocitypowered.proxy.protocol.packet.StatusResponsePacket;
@@ -101,6 +112,7 @@ import com.velocitypowered.proxy.protocol.packet.TabCompleteRequestPacket;
 import com.velocitypowered.proxy.protocol.packet.TabCompleteResponsePacket;
 import com.velocitypowered.proxy.protocol.packet.TeamPacket;
 import com.velocitypowered.proxy.protocol.packet.TransferPacket;
+import com.velocitypowered.proxy.protocol.packet.UpdateAttributesPacket;
 import com.velocitypowered.proxy.protocol.packet.UpsertPlayerInfoPacket;
 import com.velocitypowered.proxy.protocol.packet.chat.ChatAcknowledgementPacket;
 import com.velocitypowered.proxy.protocol.packet.chat.PlayerChatCompletionPacket;
@@ -438,6 +450,47 @@ public enum StateRegistry {
           map(0x0F, MINECRAFT_1_21_6, false),
           map(0x10, MINECRAFT_26_1, false));
 
+      // Economy lab: decode entity cleanup packets on the tested 1.21.11 and 26.3 paths.
+      // The 26.1 mappings prevent older packet IDs from bleeding into 26.x clients.
+      clientbound.register(SpawnEntityPacket.class, SpawnEntityPacket::new,
+          map(0x01, MINECRAFT_1_21_9, false));
+      clientbound.register(EntityAnimationPacket.class, EntityAnimationPacket::new,
+          map(0x02, MINECRAFT_1_21_9, false));
+      clientbound.register(DamageEventPacket.class, DamageEventPacket::new,
+          map(0x19, MINECRAFT_1_21_9, false));
+      clientbound.register(EntityEventPacket.class, EntityEventPacket::new,
+          map(0x22, MINECRAFT_1_21_9, false));
+      clientbound.register(GameEventPacket.class, GameEventPacket::new,
+          map(0x26, MINECRAFT_1_21_9, false),
+          map(0x27, MINECRAFT_26_3, false));
+      clientbound.register(HurtAnimationPacket.class, HurtAnimationPacket::new,
+          map(0x29, MINECRAFT_1_21_9, false),
+          map(0x2A, MINECRAFT_26_1, false),
+          map(0x2B, MINECRAFT_26_3, false));
+      clientbound.register(RemoveEntitiesPacket.class, RemoveEntitiesPacket::new,
+          map(0x4B, MINECRAFT_1_21_9, false),
+          map(0x4D, MINECRAFT_26_1, false),
+          map(0x4E, MINECRAFT_26_3, false));
+      clientbound.register(RemoveEntityEffectPacket.class, RemoveEntityEffectPacket::new,
+          map(0x4C, MINECRAFT_1_21_9, false),
+          map(0x4E, MINECRAFT_26_1, false),
+          map(0x4F, MINECRAFT_26_3, false));
+      clientbound.register(EntityMetadataPacket.class, EntityMetadataPacket::new,
+          map(0x61, MINECRAFT_1_21_9, false),
+          map(0x63, MINECRAFT_26_1, false),
+          map(0x65, MINECRAFT_26_3, false));
+      clientbound.register(EntityVelocityPacket.class, EntityVelocityPacket::new,
+          map(0x63, MINECRAFT_1_21_9, false),
+          map(0x65, MINECRAFT_26_1, false),
+          map(0x67, MINECRAFT_26_3, false));
+      clientbound.register(UpdateAttributesPacket.class, UpdateAttributesPacket::new,
+          map(0x81, MINECRAFT_1_21_9, false),
+          map(0x83, MINECRAFT_26_1, false),
+          map(0x86, MINECRAFT_26_3, false));
+      clientbound.register(EntityEffectPacket.class, EntityEffectPacket::new,
+          map(0x82, MINECRAFT_1_21_9, false),
+          map(0x84, MINECRAFT_26_1, false),
+          map(0x87, MINECRAFT_26_3, false));
       clientbound.register(
           BossBarPacket.class,
           BossBarPacket::new,

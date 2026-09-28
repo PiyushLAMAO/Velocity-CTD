@@ -49,22 +49,32 @@ import com.velocitypowered.proxy.protocol.packet.BossBarPacket;
 import com.velocitypowered.proxy.protocol.packet.BundleDelimiterPacket;
 import com.velocitypowered.proxy.protocol.packet.ClientSettingsPacket;
 import com.velocitypowered.proxy.protocol.packet.ClientboundCookieRequestPacket;
+import com.velocitypowered.proxy.protocol.packet.ClientboundSoundEntityPacket;
 import com.velocitypowered.proxy.protocol.packet.ClientboundStoreCookiePacket;
 import com.velocitypowered.proxy.protocol.packet.DisconnectPacket;
+import com.velocitypowered.proxy.protocol.packet.EntityEffectPacket;
+import com.velocitypowered.proxy.protocol.packet.EntityEventPacket;
+import com.velocitypowered.proxy.protocol.packet.EntityIdPayloadPacket;
+import com.velocitypowered.proxy.protocol.packet.GameEventPacket;
 import com.velocitypowered.proxy.protocol.packet.HeaderAndFooterPacket;
 import com.velocitypowered.proxy.protocol.packet.JoinGamePacket;
 import com.velocitypowered.proxy.protocol.packet.KeepAlivePacket;
 import com.velocitypowered.proxy.protocol.packet.LegacyPlayerListItemPacket;
 import com.velocitypowered.proxy.protocol.packet.ObjectivePacket;
 import com.velocitypowered.proxy.protocol.packet.PluginMessagePacket;
+import com.velocitypowered.proxy.protocol.packet.RemoveEntitiesPacket;
+import com.velocitypowered.proxy.protocol.packet.RemoveEntityEffectPacket;
 import com.velocitypowered.proxy.protocol.packet.RemovePlayerInfoPacket;
 import com.velocitypowered.proxy.protocol.packet.RemoveResourcePackPacket;
 import com.velocitypowered.proxy.protocol.packet.ResourcePackRequestPacket;
 import com.velocitypowered.proxy.protocol.packet.ResourcePackResponsePacket;
+import com.velocitypowered.proxy.protocol.packet.RespawnPacket;
 import com.velocitypowered.proxy.protocol.packet.ServerDataPacket;
+import com.velocitypowered.proxy.protocol.packet.SpawnEntityPacket;
 import com.velocitypowered.proxy.protocol.packet.TabCompleteResponsePacket;
 import com.velocitypowered.proxy.protocol.packet.TeamPacket;
 import com.velocitypowered.proxy.protocol.packet.TransferPacket;
+import com.velocitypowered.proxy.protocol.packet.UpdateAttributesPacket;
 import com.velocitypowered.proxy.protocol.packet.UpsertPlayerInfoPacket;
 import com.velocitypowered.proxy.protocol.packet.chat.ComponentHolder;
 import com.velocitypowered.proxy.protocol.packet.config.StartUpdatePacket;
@@ -76,6 +86,8 @@ import io.netty.buffer.Unpooled;
 import io.netty.channel.Channel;
 import io.netty.handler.timeout.ReadTimeoutException;
 import java.net.InetSocketAddress;
+import java.util.function.IntConsumer;
+import java.util.function.IntSupplier;
 import java.util.regex.Pattern;
 import net.kyori.adventure.key.Key;
 import org.apache.logging.log4j.LogManager;
@@ -191,6 +203,74 @@ public class BackendPlaySessionHandler implements MinecraftSessionHandler {
     serverConn.disconnect();
     serverConn.getPlayer().handleConnectionException(serverConn.getServer(), packet, true);
     return true;
+  }
+
+  @Override
+  public boolean handle(SpawnEntityPacket packet) {
+    playerSessionHandler.getTrackedEntityIds().add(packet.getEntityId());
+    return false;
+  }
+
+  @Override
+  public boolean handle(RemoveEntitiesPacket packet) {
+    playerSessionHandler.getTrackedEntityIds().removeAll(packet.getEntityIds());
+    return false;
+  }
+
+  @Override
+  public boolean handle(RespawnPacket packet) {
+    playerSessionHandler.setCurrentDimension(packet.getDimension(), packet.getDimensionInfo());
+    return false;
+  }
+
+  @Override
+  public boolean handle(UpdateAttributesPacket packet) {
+    if (rewritePlayerEntityId(packet::getEntityId, packet::setEntityId)) {
+      for (UpdateAttributesPacket.AttributeSnapshot attribute : packet.getAttributes()) {
+        playerSessionHandler.getTrackedPlayerAttributes().put(attribute.getId(), attribute);
+      }
+    }
+    return false;
+  }
+
+  @Override
+  public boolean handle(EntityEffectPacket packet) {
+    if (rewritePlayerEntityId(packet::getEntityId, packet::setEntityId)) {
+      playerSessionHandler.getTrackedPlayerEffects().add(packet.getEffectId());
+    }
+    return false;
+  }
+
+  @Override
+  public boolean handle(RemoveEntityEffectPacket packet) {
+    if (rewritePlayerEntityId(packet::getEntityId, packet::setEntityId)) {
+      playerSessionHandler.getTrackedPlayerEffects().remove(packet.getEffectId());
+    }
+    return false;
+  }
+
+  @Override
+  public boolean handle(EntityEventPacket packet) {
+    rewritePlayerEntityId(packet::getEntityId, packet::setEntityId);
+    return false;
+  }
+
+  @Override
+  public boolean handle(EntityIdPayloadPacket packet) {
+    rewritePlayerEntityId(packet::getEntityId, packet::setEntityId);
+    return false;
+  }
+
+  @Override
+  public boolean handle(ClientboundSoundEntityPacket packet) {
+    rewritePlayerEntityId(packet::getEmitterEntityId, packet::setEmitterEntityId);
+    return false;
+  }
+
+  @Override
+  public boolean handle(GameEventPacket packet) {
+    return packet.getEvent() == GameEventPacket.EVENT_START_WAITING_FOR_CHUNKS
+        && playerSessionHandler.consumeSeamlessChunkWait();
   }
 
   @Override
@@ -483,6 +563,18 @@ public class BackendPlaySessionHandler implements MinecraftSessionHandler {
           }
         }, playerConnection.eventLoop());
 
+    return true;
+  }
+
+  private boolean rewritePlayerEntityId(IntSupplier getter, IntConsumer setter) {
+    Integer backendId = serverConn.getEntityId();
+    Integer clientId = playerSessionHandler.getClientEntityId();
+    if (backendId == null || clientId == null || getter.getAsInt() != backendId) {
+      return false;
+    }
+    if (!backendId.equals(clientId)) {
+      setter.accept(clientId);
+    }
     return true;
   }
 
