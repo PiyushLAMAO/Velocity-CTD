@@ -87,6 +87,7 @@ public class FastBackendConfigSessionHandler implements MinecraftSessionHandler 
   private boolean answeredKnownPacks;
 
   private boolean decided;
+  private @Nullable TagsUpdatePacket playTags;
 
   public FastBackendConfigSessionHandler(VelocityServer server, VelocityServerConnection serverConn,
                                          CompletableFuture<Impl> resultFuture) {
@@ -140,6 +141,7 @@ public class FastBackendConfigSessionHandler implements MinecraftSessionHandler 
   @Override
   public boolean handle(TagsUpdatePacket packet) {
     snapshot.addTags(packet.getTags());
+    playTags = packet;
     bufferRetained(packet);
     return true;
   }
@@ -235,6 +237,16 @@ public class FastBackendConfigSessionHandler implements MinecraftSessionHandler 
     ConfigStateSnapshot backendSnapshot = snapshot.build();
     ConfigStateSnapshot clientSnapshot = player.getClientConfigSnapshot();
     boolean compatible = backendSnapshot.matches(clientSnapshot);
+    boolean gatewayPair = serverConn.getPreviousServer().map(previous ->
+        (previous.getServerInfo().getName().equals("hub") && serverConn.getProxyAdmission() != null)
+        || (previous.getServerInfo().getName().equals("economy-route") && serverConn.getServerInfo().getName().equals("hub")))
+        .orElse(false);
+    if (!compatible && gatewayPair && playTags != null
+        && backendSnapshot.matchesWithPlayTagUpdate(clientSnapshot)) {
+      // Publish tags only after JoinGame accepts this target. Registry changes still require CONFIG.
+      serverConn.setPendingPlayTags(playTags, backendSnapshot);
+      compatible = true;
+    }
 
     if (!compatible) {
       logSnapshotDiff(player, clientSnapshot, backendSnapshot);

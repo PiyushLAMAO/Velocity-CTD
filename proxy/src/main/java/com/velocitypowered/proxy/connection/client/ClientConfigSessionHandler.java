@@ -62,9 +62,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
-/**
- * Handles the client config stage.
- */
+/** Handles the client config stage. */
 public class ClientConfigSessionHandler implements MinecraftSessionHandler {
   private static final boolean BACKPRESSURE_LOG =
       Boolean.getBoolean("velocity.log-server-backpressure");
@@ -83,13 +81,14 @@ public class ClientConfigSessionHandler implements MinecraftSessionHandler {
 
   private final VelocityServer server;
   private final ConnectedPlayer player;
+  private final PendingPluginMessages pendingPluginMessages;
   private String brandChannel = null;
 
   private CompletableFuture<?> configurationFuture;
+  private volatile boolean knownPacksResponseWaiting;
   private CompletableFuture<Void> configSwitchFuture;
 
   private boolean configuredOnce;
-  private boolean knownPacksAnswered;
 
   // Active resource pack hold and its keepalive task, or null when no hold is in progress.
   private volatile @Nullable CompletableFuture<Void> resourcePackHold;
@@ -104,18 +103,19 @@ public class ClientConfigSessionHandler implements MinecraftSessionHandler {
   public ClientConfigSessionHandler(VelocityServer server, ConnectedPlayer player) {
     this.server = server;
     this.player = player;
+    this.pendingPluginMessages = new PendingPluginMessages(player);
   }
 
   @Override
   public void activated() {
     configSwitchFuture = new CompletableFuture<>();
-    knownPacksAnswered = false;
   }
 
   @Override
   public void deactivated() {
     configurationFuture = null;
     player.setDropKnownPacksResponseToBackend(false);
+    knownPacksResponseWaiting = false;
   }
 
   @Override
@@ -143,16 +143,17 @@ public class ClientConfigSessionHandler implements MinecraftSessionHandler {
 
   @Override
   public boolean handle(ResourcePackResponsePacket packet) {
-    return player.resourcePackHandler().onResourcePackResponse(
-        new ResourcePackResponseBundle(packet.getId(),
-            packet.getHash(),
-            packet.getStatus())
-    );
+    return player
+        .resourcePackHandler()
+        .onResourcePackResponse(
+            new ResourcePackResponseBundle(packet.getId(), packet.getHash(), packet.getStatus()));
   }
 
   @Override
   public boolean handle(FinishedUpdatePacket packet) {
-    player.getConnection().setActiveSessionHandler(StateRegistry.PLAY, new ClientPlaySessionHandler(server, player));
+    player
+        .getConnection()
+        .setActiveSessionHandler(StateRegistry.PLAY, new ClientPlaySessionHandler(server, player));
 
     configSwitchFuture.complete(null);
     return true;
@@ -160,7 +161,7 @@ public class ClientConfigSessionHandler implements MinecraftSessionHandler {
 
   @Override
   public boolean handle(final PluginMessagePacket packet) {
-    final VelocityServerConnection serverConn = player.getConnectionInFlight();
+    final VelocityServerConnection serverConn = configurationTarget();
     if (PluginMessageUtil.isMcBrand(packet)) {
       final String brand = PluginMessageUtil.readBrandMessage(packet.content());
       server.getEventManager().fireAndForget(new PlayerClientBrandEvent(player, brand));
@@ -174,7 +175,15 @@ public class ClientConfigSessionHandler implements MinecraftSessionHandler {
       ChannelIdentifier id = this.server.getChannelRegistrar().getFromId(packet.getChannel());
 
       if (id == null) {
-        serverConn.ensureConnected().write(packet.retain());
+        final MinecraftConnection smc = serverConn.getConnection();
+        if (smc != null) {
+          smc.write(packet.retain());
+        }
+        return true;
+      }
+
+      int size = packet.content().readableBytes();
+      if (!pendingPluginMessages.reserve(size)) {
         return true;
       }
 
@@ -182,45 +191,46 @@ public class ClientConfigSessionHandler implements MinecraftSessionHandler {
       // the connection while we toss this off into another pool
       byte[] bytes = ByteBufUtil.getBytes(packet.content());
       serverConn.getPlayer().getConnection().setAutoReading(false);
-      this.server.getEventManager()
+      this.server
+          .getEventManager()
           .fire(new PluginMessageEvent(serverConn.getPlayer(), serverConn, id, bytes))
-          .thenAcceptAsync(pme -> {
-            if (pme.getResult().isAllowed() && serverConn.getConnection() != null) {
-              serverConn.ensureConnected().write(new PluginMessagePacket(
-                  pme.getIdentifier().getId(), Unpooled.wrappedBuffer(bytes)));
-            }
-            serverConn.getPlayer().getConnection().setAutoReading(true);
-          }, player.getConnection().eventLoop()).exceptionally((ex) -> {
-            LOGGER.error("Exception while handling plugin message packet for {}", player, ex);
-            return null;
-          });
+          .thenAcceptAsync(
+              pme -> {
+                if (pme.getResult().isAllowed() && serverConn.getConnection() != null) {
+                  serverConn
+                      .ensureConnected()
+                      .write(
+                          new PluginMessagePacket(
+                              pme.getIdentifier().getId(), Unpooled.wrappedBuffer(bytes)));
+                }
+                serverConn.getPlayer().getConnection().setAutoReading(true);
+              },
+              player.getConnection().eventLoop())
+          .exceptionally(
+              (ex) -> {
+                LOGGER.error("Exception while handling plugin message packet for {}", player, ex);
+                return null;
+              })
+          .whenComplete((ignored, ex) -> pendingPluginMessages.release(size));
     }
     return true;
   }
 
   @Override
   public boolean handle(PingIdentifyPacket packet) {
-    if (player.getConnectionInFlight() != null) {
-      player.getConnectionInFlight().ensureConnected().write(packet);
-      return true;
-    }
-
-    return false;
+    return writeToConnectionInFlight(packet);
   }
 
   @Override
   public boolean handle(KnownPacksPacket packet) {
     player.setClientKnownPacks(packet.getPacks());
 
-    boolean dropped = player.consumeDropKnownPacksResponseToBackend();
-    boolean duplicate = knownPacksAnswered;
-    knownPacksAnswered = true;
-
-    if (dropped || duplicate) {
-      VelocityServerConnection targetServer = player.getConnectionInFlightOrConnectedServer();
-      LOGGER.warn("Suppressing known packs response from {} (reason={}, target={})", player,
-          duplicate ? "duplicate-in-configuration" : "already-answered-by-fast-transition",
-          targetServer == null ? "<none>" : targetServer.getServerInfo().getName());
+    if (player.consumeDropKnownPacksResponseToBackend()) {
+      return true;
+    }
+    if (knownPacksResponseWaiting) {
+      player.disconnect(
+          Component.translatable("velocity.error.player-connection-error", NamedTextColor.RED));
       return true;
     }
 
@@ -234,44 +244,62 @@ public class ClientConfigSessionHandler implements MinecraftSessionHandler {
       return true;
     }
 
-    callConfigurationEvent().thenRunAsync(() -> {
-      if (smc.isClosed()) {
-        return;
-      }
+    knownPacksResponseWaiting = true;
+    callConfigurationEvent()
+        .thenRunAsync(
+            () -> {
+              knownPacksResponseWaiting = false;
+              if (smc.isClosed()) {
+                return;
+              }
 
-      if (smc.getState() != StateRegistry.CONFIG) {
-        LOGGER.warn("Dropping late known packs response from {}: {} left the configuration state",
-            player, targetServer.getServerInfo().getName());
-        return;
-      }
+              if (smc.getState() != StateRegistry.CONFIG) {
+                LOGGER.warn(
+                    "Dropping late known packs response from {}: {} left the configuration state",
+                    player,
+                    targetServer.getServerInfo().getName());
+                return;
+              }
 
-      smc.write(packet);
-    }, smc.eventLoop()).exceptionally(ex -> {
-      LOGGER.error("Error forwarding known packs response to backend:", ex);
-      return null;
-    });
+              smc.write(packet);
+            },
+            smc.eventLoop())
+        .exceptionally(
+            ex -> {
+              knownPacksResponseWaiting = false;
+              LOGGER.error("Error forwarding known packs response to backend:", ex);
+              return null;
+            });
 
     return true;
   }
 
   @Override
   public boolean handle(ServerboundCookieResponsePacket packet) {
-    server.getEventManager()
+    server
+        .getEventManager()
         .fire(new CookieReceiveEvent(player, packet.getKey(), packet.getPayload()))
-        .thenAcceptAsync(event -> {
-          if (event.getResult().isAllowed()) {
-            final VelocityServerConnection serverConnection = player.getConnectionInFlight();
-            if (serverConnection != null) {
-              final Key resultedKey = event.getResult().getKey() == null
-                  ? event.getOriginalKey() : event.getResult().getKey();
-              final byte[] resultedData = event.getResult().getData() == null
-                  ? event.getOriginalData() : event.getResult().getData();
+        .thenAcceptAsync(
+            event -> {
+              if (event.getResult().isAllowed()) {
+                final VelocityServerConnection serverConnection = configurationTarget();
+                final MinecraftConnection smc =
+                    serverConnection == null ? null : serverConnection.getConnection();
+                if (smc != null) {
+                  final Key resultedKey =
+                      event.getResult().getKey() == null
+                          ? event.getOriginalKey()
+                          : event.getResult().getKey();
+                  final byte[] resultedData =
+                      event.getResult().getData() == null
+                          ? event.getOriginalData()
+                          : event.getResult().getData();
 
-              serverConnection.ensureConnected()
-                  .write(new ServerboundCookieResponsePacket(resultedKey, resultedData));
-            }
-          }
-        }, player.getConnection().eventLoop());
+                  smc.write(new ServerboundCookieResponsePacket(resultedKey, resultedData));
+                }
+              }
+            },
+            player.getConnection().eventLoop());
 
     return true;
   }
@@ -280,7 +308,10 @@ public class ClientConfigSessionHandler implements MinecraftSessionHandler {
   public boolean handle(ServerboundCustomClickActionPacket packet) {
     VelocityServerConnection serverConnection = player.getConnectionInFlightOrConnectedServer();
     if (serverConnection != null) {
-      serverConnection.ensureConnected().write(packet.retain());
+      final MinecraftConnection smc = serverConnection.getConnection();
+      if (smc != null) {
+        smc.write(packet.retain());
+      }
       return true;
     }
 
@@ -289,12 +320,47 @@ public class ClientConfigSessionHandler implements MinecraftSessionHandler {
 
   @Override
   public boolean handle(CodeOfConductAcceptPacket packet) {
-    if (this.player.getConnectionInFlight() != null) {
-      this.player.getConnectionInFlight().ensureConnected().write(packet);
-      return true;
+    return writeToConnectionInFlight(packet);
+  }
+
+  /**
+   * Forwards a packet to the server connection in flight, if there is one. A connection in flight
+   * that is still connecting, or already gone, takes nothing, rather than the player being
+   * disconnected for it.
+   *
+   * @param packet the packet to forward
+   * @return whether a connection was in flight
+   */
+  private boolean writeToConnectionInFlight(MinecraftPacket packet) {
+    final VelocityServerConnection inFlight = player.getConnectionInFlight();
+    if (inFlight == null) {
+      return false;
     }
 
-    return false;
+    final MinecraftConnection smc = inFlight.getConnection();
+    if (smc != null) {
+      smc.write(packet);
+    }
+    return true;
+  }
+
+  /**
+   * Returns the backend the player is being configured for: the one in flight, or else the
+   * connected server when it is the one that sent the player back to configuration, which leaves it
+   * in CONFIG itself. Without it, what the client answers during a reconfiguration the backend
+   * started was dropped.
+   *
+   * @return the backend being configured, or {@code null} if there is none
+   */
+  private @Nullable VelocityServerConnection configurationTarget() {
+    final VelocityServerConnection inFlight = player.getConnectionInFlight();
+    if (inFlight != null) {
+      return inFlight;
+    }
+
+    final VelocityServerConnection connected = player.getConnectedServer();
+    final MinecraftConnection smc = connected == null ? null : connected.getConnection();
+    return smc != null && smc.getState() == StateRegistry.CONFIG ? connected : null;
   }
 
   @Override
@@ -341,7 +407,8 @@ public class ClientConfigSessionHandler implements MinecraftSessionHandler {
 
   @Override
   public void exception(Throwable throwable) {
-    player.disconnect(Component.translatable("velocity.error.player-connection-error", NamedTextColor.RED));
+    player.disconnect(
+        Component.translatable("velocity.error.player-connection-error", NamedTextColor.RED));
     if (MinecraftDecoder.DEBUG) {
       LOGGER.info("Exception while handling packet for {}", player, throwable);
     }
@@ -369,21 +436,17 @@ public class ClientConfigSessionHandler implements MinecraftSessionHandler {
     if (serverConn != null) {
       final MinecraftConnection smc = serverConn.getConnection();
       if (smc != null) {
-        smc.setAutoReading(writable);
+        smc.setPausedForBackpressure(!writable);
       }
     }
   }
 
   /**
-   * Calls the {@link PlayerConfigurationEvent}.
-   * For 1.20.5+ backends, this is done when the client responds to
-   * the known packs request. The response is delayed until the event
-   * has been called.
-   * For 1.20.2-1.20.4 servers, this is done when the client acknowledges
-   * the end of the configuration.
-   * This is handled differently because for 1.20.5+ servers can't keep
-   * their connection alive between states and older servers don't have
-   * the known packs transaction.
+   * Calls the {@link PlayerConfigurationEvent}. For 1.20.5+ backends, this is done when the client
+   * responds to the known packs request. The response is delayed until the event has been called.
+   * For 1.20.2-1.20.4 servers, this is done when the client acknowledges the end of the
+   * configuration. This is handled differently because for 1.20.5+ servers can't keep their
+   * connection alive between states and older servers don't have the known packs transaction.
    *
    * @return a {@link CompletableFuture} that completes when the configuration event is fired
    */
@@ -392,8 +455,12 @@ public class ClientConfigSessionHandler implements MinecraftSessionHandler {
       return configurationFuture;
     }
 
-    CompletableFuture<?> future = server.getEventManager().fire(new PlayerConfigurationEvent(player,
-            player.getConnectionInFlightOrConnectedServer()));
+    CompletableFuture<?> future =
+        server
+            .getEventManager()
+            .fire(
+                new PlayerConfigurationEvent(
+                    player, player.getConnectionInFlightOrConnectedServer()));
     configurationFuture = future;
     return future;
   }
@@ -420,73 +487,113 @@ public class ClientConfigSessionHandler implements MinecraftSessionHandler {
 
     callConfigurationEvent()
         .thenCompose(v -> applyConfigurationResourcePack(serverConn, firstJoin))
-        .thenCompose(v -> server.getEventManager().fire(new PlayerFinishConfigurationEvent(player, serverConn))
-        .completeOnTimeout(null, 5, TimeUnit.SECONDS)).thenRunAsync(() -> {
-          if (player.getConnection().isClosed()) {
-            return;
-          }
+        .thenCompose(
+            v ->
+                server
+                    .getEventManager()
+                    .fire(new PlayerFinishConfigurationEvent(player, serverConn))
+                    .completeOnTimeout(null, 5, TimeUnit.SECONDS))
+        .thenRunAsync(
+            () -> {
+              if (player.getConnection().isClosed()) {
+                return;
+              }
 
-          player.getConnection().write(FinishedUpdatePacket.INSTANCE);
-          player.getConnection().getChannel().pipeline().get(MinecraftEncoder.class).setState(StateRegistry.PLAY);
-          server.getEventManager().fireAndForget(new PlayerFinishedConfigurationEvent(player, serverConn));
-        }, player.getConnection().eventLoop()).exceptionally(ex -> {
-          LOGGER.error("Error finishing configuration state:", ex);
-          return null;
-        });
+              player.getConnection().write(FinishedUpdatePacket.INSTANCE);
+              player
+                  .getConnection()
+                  .getChannel()
+                  .pipeline()
+                  .get(MinecraftEncoder.class)
+                  .setState(StateRegistry.PLAY);
+              server
+                  .getEventManager()
+                  .fireAndForget(new PlayerFinishedConfigurationEvent(player, serverConn));
+            },
+            player.getConnection().eventLoop())
+        .exceptionally(
+            ex -> {
+              LOGGER.error("Error finishing configuration state:", ex);
+              return null;
+            });
 
     return configSwitchFuture;
   }
 
   /**
    * Fires the {@link PlayerConfigurationResourcePackEvent} and, if a pack was set, holds the player
-   * in configuration until every pack settles, or disconnects after
-   * {@link #RESOURCE_PACK_HOLD_CAP_SECONDS}. The backend is advanced to PLAY separately (see
-   * {@code ConfigSessionHandler}) so it doesn't time out during the hold.
+   * in configuration until every pack settles, or disconnects after {@link
+   * #RESOURCE_PACK_HOLD_CAP_SECONDS}. The backend is advanced to PLAY separately (see {@code
+   * ConfigSessionHandler}) so it doesn't time out during the hold.
    *
    * @param serverConn the server (re-)configuring the player
-   * @param firstJoin  whether this is the initial configuration following login
+   * @param firstJoin whether this is the initial configuration following login
    * @return a future completing once the pack(s) settle, or immediately if none were set
    */
-  private CompletableFuture<Void> applyConfigurationResourcePack(VelocityServerConnection serverConn,
-                                                                 boolean firstJoin) {
+  private CompletableFuture<Void> applyConfigurationResourcePack(
+      VelocityServerConnection serverConn, boolean firstJoin) {
     PlayerConfigurationResourcePackEvent event =
         new PlayerConfigurationResourcePackEvent(player, serverConn, firstJoin);
-    return server.getEventManager().fire(event).thenComposeAsync(result -> {
-      ResourcePackRequest request = result.getResourcePack();
-      if (request == null || player.getConnection().isClosed()) {
-        return CompletableFuture.completedFuture(null);
-      }
+    return server
+        .getEventManager()
+        .fire(event)
+        .thenComposeAsync(
+            result -> {
+              ResourcePackRequest request = result.getResourcePack();
+              if (request == null || player.getConnection().isClosed()) {
+                return CompletableFuture.completedFuture(null);
+              }
 
-      CompletableFuture<Void> hold = player.resourcePackHandler().queueResourcePackAndAwait(request);
-      this.resourcePackHold = hold;
-      startResourcePackKeepAlive();
+              CompletableFuture<Void> hold =
+                  player.resourcePackHandler().queueResourcePackAndAwait(request);
+              this.resourcePackHold = hold;
+              startResourcePackKeepAlive();
 
-      // Disconnect a player who never responds within the cap.
-      ScheduledFuture<?> holdCap = player.getConnection().eventLoop().schedule(() -> {
-        if (!hold.isDone()) {
-          player.disconnect(Component.translatable(
-              "velocity.error.resource-pack-configuration-timeout", NamedTextColor.RED));
-        }
-      }, RESOURCE_PACK_HOLD_CAP_SECONDS, TimeUnit.SECONDS);
+              // Disconnect a player who never responds within the cap.
+              ScheduledFuture<?> holdCap =
+                  player
+                      .getConnection()
+                      .eventLoop()
+                      .schedule(
+                          () -> {
+                            if (!hold.isDone()) {
+                              player.disconnect(
+                                  Component.translatable(
+                                      "velocity.error.resource-pack-configuration-timeout",
+                                      NamedTextColor.RED));
+                            }
+                          },
+                          RESOURCE_PACK_HOLD_CAP_SECONDS,
+                          TimeUnit.SECONDS);
 
-      return hold.whenCompleteAsync((v, t) -> {
-        holdCap.cancel(false);
-        stopResourcePackKeepAlive();
-        this.resourcePackHold = null;
-      }, player.getConnection().eventLoop()).exceptionally(t -> {
-        LOGGER.error("Couldn't apply configuration resource pack for {}", player, t);
-        return null;
-      });
-    }, player.getConnection().eventLoop());
+              return hold.whenCompleteAsync(
+                      (v, t) -> {
+                        holdCap.cancel(false);
+                        stopResourcePackKeepAlive();
+                        this.resourcePackHold = null;
+                      },
+                      player.getConnection().eventLoop())
+                  .exceptionally(
+                      t -> {
+                        LOGGER.error(
+                            "Couldn't apply configuration resource pack for {}", player, t);
+                        return null;
+                      });
+            },
+            player.getConnection().eventLoop());
   }
 
   private void startResourcePackKeepAlive() {
     if (resourcePackKeepAlive == null) {
-      resourcePackKeepAlive = player.getConnection().eventLoop().scheduleAtFixedRate(
-          player::sendKeepAlive,
-          RESOURCE_PACK_KEEP_ALIVE_INTERVAL_SECONDS,
-          RESOURCE_PACK_KEEP_ALIVE_INTERVAL_SECONDS,
-          TimeUnit.SECONDS);
+      resourcePackKeepAlive =
+          player
+              .getConnection()
+              .eventLoop()
+              .scheduleAtFixedRate(
+                  player::sendKeepAlive,
+                  RESOURCE_PACK_KEEP_ALIVE_INTERVAL_SECONDS,
+                  RESOURCE_PACK_KEEP_ALIVE_INTERVAL_SECONDS,
+                  TimeUnit.SECONDS);
     }
   }
 

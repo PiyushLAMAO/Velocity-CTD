@@ -29,7 +29,7 @@ import io.netty.buffer.ByteBuf;
 public class GameEventPacket implements MinecraftPacket {
 
   public static final int EVENT_START_RAINING = 1;
-  public static final int EVENT_END_RAINING = 2;
+  public static final int EVENT_END_RAINING = 1;
   public static final int EVENT_CHANGE_GAMEMODE = 3;
   // The client keeps the rain and thunder gradients separate from the "is it raining" flag, and
   // only ever changes them when the server tells it to. Ending the rain sets the rain gradient to

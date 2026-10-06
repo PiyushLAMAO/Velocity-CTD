@@ -361,7 +361,7 @@ public class JoinGamePacket implements MinecraftPacket {
 
     if (version.noLessThan(ProtocolVersion.MINECRAFT_26_3)) {
       this.gamemode = ProtocolUtils.readVarInt(buf);
-      this.previousGamemode = ProtocolUtils.readVarInt(buf); // game mode + 1 or 0
+      this.previousGamemode = ProtocolUtils.readVarInt(buf) - 1; // game mode + 1 or 0
     } else {
       this.gamemode = buf.readByte();
       this.previousGamemode = buf.readByte(); // game mode or -1
@@ -519,7 +519,7 @@ public class JoinGamePacket implements MinecraftPacket {
 
     if (version.noLessThan(ProtocolVersion.MINECRAFT_26_3)) {
       ProtocolUtils.writeVarInt(buf, this.gamemode);
-      ProtocolUtils.writeVarInt(buf, this.previousGamemode);
+      ProtocolUtils.writeVarInt(buf, this.previousGamemode + 1);
     } else {
       buf.writeByte(this.gamemode);
       buf.writeByte(this.previousGamemode);
