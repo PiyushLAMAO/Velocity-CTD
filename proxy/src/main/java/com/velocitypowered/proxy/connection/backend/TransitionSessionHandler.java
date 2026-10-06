@@ -33,8 +33,6 @@ import com.velocitypowered.proxy.connection.client.ConnectedPlayer;
 import com.velocitypowered.proxy.connection.util.ConnectionMessages;
 import com.velocitypowered.proxy.connection.util.ConnectionRequestResults;
 import com.velocitypowered.proxy.connection.util.ConnectionRequestResults.Impl;
-import com.velocitypowered.proxy.network.Connections;
-import com.velocitypowered.proxy.network.netty.StallSafeReadTimeoutHandler;
 import com.velocitypowered.proxy.protocol.MinecraftPacket;
 import com.velocitypowered.proxy.protocol.StateRegistry;
 import com.velocitypowered.proxy.protocol.netty.ProxyJoinPacketQueue;
@@ -44,8 +42,8 @@ import com.velocitypowered.proxy.protocol.packet.KeepAlivePacket;
 import com.velocitypowered.proxy.protocol.packet.PluginMessagePacket;
 import com.velocitypowered.proxy.server.VelocityRegisteredServer;
 import io.netty.buffer.ByteBuf;
+import com.velocitypowered.proxy.network.Connections;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.TimeUnit;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -61,8 +59,10 @@ public class TransitionSessionHandler implements MinecraftSessionHandler {
   private final CompletableFuture<Impl> resultFuture;
   private final BungeeCordMessageResponder bungeecordMessageResponder;
 
-  // Backend packets arriving while JoinGame is processed (async) are held and replayed after it, so
-  // the client never gets world data before JoinGame. Empty in the normal flow (autoReading off).
+  // Backend packets that reach this handler before the switch completes, decoded or not, are held
+  // and replayed after JoinGame: the client can only apply them once it has JoinGame, and dropping
+  // one loses one-shot state such as the world clock sync (PaperMC/Velocity#1873). Reading is
+  // paused while JoinGame is processed, so this is empty in the normal flow.
   private boolean joinGameProcessing;
   private final DeferredPlayPackets deferredPackets = new DeferredPlayPackets();
 
@@ -163,16 +163,6 @@ public class TransitionSessionHandler implements MinecraftSessionHandler {
           serverConn.completeJoin();
           playHandler.handleBackendJoinGame(packet, serverConn);
 
-          // The login/configuration sequence is complete: swap the short login timeout that
-          // BackendChannelInitializer installed for the regular in-play read-timeout, so a healthy
-          // but momentarily idle backend isn't dropped (issue GemstoneGG#938).
-          final var backendPipeline = smc.getChannel().pipeline();
-          if (backendPipeline.context(Connections.READ_TIMEOUT) != null) {
-            backendPipeline.replace(Connections.READ_TIMEOUT, Connections.READ_TIMEOUT,
-                new StallSafeReadTimeoutHandler(server.getConfiguration().getReadTimeout(),
-                    TimeUnit.MILLISECONDS));
-          }
-
           // Replay through PLAY dispatch, including entity translation and world tracking.
           joinGameProcessing = false;
           deferredPackets.replay(backendHandler);
@@ -269,18 +259,14 @@ public class TransitionSessionHandler implements MinecraftSessionHandler {
 
   @Override
   public void handleGeneric(MinecraftPacket packet) {
-    // Hold packets during JoinGame processing to replay in order; otherwise drop (the default).
-    if (joinGameProcessing) {
-      deferredPackets.add(packet);
-    }
+    // Upstream holds all early PLAY state, including frames preceding JoinGame.
+    deferredPackets.add(packet);
   }
 
   @Override
   public void handleUnknown(ByteBuf packet) {
-    if (joinGameProcessing) {
-      // auto-read does not stop packets already decoded from the current read batch.
-      deferredPackets.add(packet);
-    }
+    // auto-read does not stop frames already decoded from the current read batch.
+    deferredPackets.add(packet);
   }
 
   private void releaseDeferredPackets() {
