@@ -208,7 +208,7 @@ public class RespawnPacket implements MinecraftPacket {
     }
     if (version.noLessThan(ProtocolVersion.MINECRAFT_1_16)) {
       if (version.noLessThan(ProtocolVersion.MINECRAFT_26_3)) {
-        this.previousGamemode = ProtocolUtils.readVarInt(buf);
+        this.previousGamemode = ProtocolUtils.readVarInt(buf) - 1;
       } else {
         this.previousGamemode = buf.readByte();
       }
@@ -268,7 +268,7 @@ public class RespawnPacket implements MinecraftPacket {
     }
     if (version.noLessThan(ProtocolVersion.MINECRAFT_1_16)) {
       if (version.noLessThan(ProtocolVersion.MINECRAFT_26_3)) {
-        ProtocolUtils.writeVarInt(buf, this.previousGamemode);
+        ProtocolUtils.writeVarInt(buf, this.previousGamemode + 1);
       } else {
         buf.writeByte(this.previousGamemode);
       }

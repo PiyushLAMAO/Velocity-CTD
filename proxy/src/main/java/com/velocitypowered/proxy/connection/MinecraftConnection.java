@@ -390,6 +390,20 @@ public class MinecraftConnection extends ChannelInboundHandlerAdapter {
     return remoteAddress;
   }
 
+  /**
+   * Restores the client address from an authenticated proxy admission proof.
+   * The caller must verify that proof before using this method.
+   *
+   * @param address the original, resolved client socket address
+   */
+  public void setForwardedRemoteAddress(InetSocketAddress address) {
+    ensureInEventLoop();
+    Objects.requireNonNull(address, "address");
+    Preconditions.checkArgument(!address.isUnresolved() && address.getPort() > 0,
+        "Forwarded client address must be resolved and have a source port");
+    this.remoteAddress = address;
+  }
+
   public StateRegistry getState() {
     return state;
   }

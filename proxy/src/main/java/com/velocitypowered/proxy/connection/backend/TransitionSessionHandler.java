@@ -37,14 +37,13 @@ import com.velocitypowered.proxy.network.Connections;
 import com.velocitypowered.proxy.network.netty.StallSafeReadTimeoutHandler;
 import com.velocitypowered.proxy.protocol.MinecraftPacket;
 import com.velocitypowered.proxy.protocol.StateRegistry;
+import com.velocitypowered.proxy.protocol.netty.ProxyJoinPacketQueue;
 import com.velocitypowered.proxy.protocol.packet.DisconnectPacket;
 import com.velocitypowered.proxy.protocol.packet.JoinGamePacket;
 import com.velocitypowered.proxy.protocol.packet.KeepAlivePacket;
 import com.velocitypowered.proxy.protocol.packet.PluginMessagePacket;
 import com.velocitypowered.proxy.server.VelocityRegisteredServer;
-import io.netty.util.ReferenceCountUtil;
-import java.util.ArrayDeque;
-import java.util.Queue;
+import io.netty.buffer.ByteBuf;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import org.apache.logging.log4j.LogManager;
@@ -65,7 +64,7 @@ public class TransitionSessionHandler implements MinecraftSessionHandler {
   // Backend packets arriving while JoinGame is processed (async) are held and replayed after it, so
   // the client never gets world data before JoinGame. Empty in the normal flow (autoReading off).
   private boolean joinGameProcessing;
-  private final Queue<MinecraftPacket> deferredPackets = new ArrayDeque<>();
+  private final DeferredPlayPackets deferredPackets = new DeferredPlayPackets();
 
   /**
    * Creates the new transition handler.
@@ -133,6 +132,7 @@ public class TransitionSessionHandler implements MinecraftSessionHandler {
           // Make sure we can still transition (player might have disconnected here).
           if (!serverConn.isActive()) {
             // Connection is obsolete.
+            releaseDeferredPackets();
             serverConn.disconnect();
             return;
           }
@@ -147,11 +147,21 @@ public class TransitionSessionHandler implements MinecraftSessionHandler {
             player.getConnection().setActiveSessionHandler(StateRegistry.PLAY, playHandler);
           }
 
+          // Publish both sides before JoinGame flushes. The client can immediately answer
+          // position/arrival packets or issue a command on the other Netty event loop.
+          if (serverConn.getProxyAdmission() != null
+              && smc.getChannel().pipeline().context(ProxyJoinPacketQueue.NAME) == null) {
+            smc.getChannel().pipeline().addBefore(Connections.HANDLER,
+                ProxyJoinPacketQueue.NAME, new ProxyJoinPacketQueue(smc.getProtocolVersion()));
+          }
+          final BackendPlaySessionHandler backendHandler =
+              new BackendPlaySessionHandler(server, serverConn);
+          smc.setActiveSessionHandler(StateRegistry.PLAY, backendHandler);
+          player.setConnectedServer(serverConn);
+          // World packets may be answered on the other event loop as soon as they flush.
+          // Publish the forwarding phase first, or those early raw responses are dropped.
+          serverConn.completeJoin();
           playHandler.handleBackendJoinGame(packet, serverConn);
-
-          // Set the new play session handler for the server. We will have nothing more to do
-          // with this connection once this task finishes up.
-          smc.setActiveSessionHandler(StateRegistry.PLAY, new BackendPlaySessionHandler(server, serverConn));
 
           // The login/configuration sequence is complete: swap the short login timeout that
           // BackendChannelInitializer installed for the regular in-play read-timeout, so a healthy
@@ -163,11 +173,9 @@ public class TransitionSessionHandler implements MinecraftSessionHandler {
                     TimeUnit.MILLISECONDS));
           }
 
-          // Now set the connected server.
-          serverConn.getPlayer().setConnectedServer(serverConn);
-
-          // JoinGame processed: replay any packets held behind it before resuming reads.
-          flushDeferredPackets();
+          // Replay through PLAY dispatch, including entity translation and world tracking.
+          joinGameProcessing = false;
+          deferredPackets.replay(backendHandler);
 
           // Clean up disabling auto-read while the connected event was being processed.
           // Do this after setting the connection, so no incoming packets are processed before
@@ -230,7 +238,6 @@ public class TransitionSessionHandler implements MinecraftSessionHandler {
   public boolean handle(PluginMessagePacket packet) {
     // Hold plugin messages during JoinGame processing so they reach the client after it.
     if (joinGameProcessing) {
-      ReferenceCountUtil.retain(packet);
       deferredPackets.add(packet);
       return true;
     }
@@ -264,31 +271,21 @@ public class TransitionSessionHandler implements MinecraftSessionHandler {
   public void handleGeneric(MinecraftPacket packet) {
     // Hold packets during JoinGame processing to replay in order; otherwise drop (the default).
     if (joinGameProcessing) {
-      ReferenceCountUtil.retain(packet);
       deferredPackets.add(packet);
     }
   }
 
-  private void flushDeferredPackets() {
-    joinGameProcessing = false;
-    if (deferredPackets.isEmpty()) {
-      return;
+  @Override
+  public void handleUnknown(ByteBuf packet) {
+    if (joinGameProcessing) {
+      // auto-read does not stop packets already decoded from the current read batch.
+      deferredPackets.add(packet);
     }
-
-    final MinecraftConnection clientConn = serverConn.getPlayer().getConnection();
-    MinecraftPacket packet;
-    while ((packet = deferredPackets.poll()) != null) {
-      clientConn.delayedWrite(packet);
-    }
-    clientConn.flush();
   }
 
   private void releaseDeferredPackets() {
     joinGameProcessing = false;
-    MinecraftPacket packet;
-    while ((packet = deferredPackets.poll()) != null) {
-      ReferenceCountUtil.release(packet);
-    }
+    deferredPackets.clear();
   }
 
   @Override

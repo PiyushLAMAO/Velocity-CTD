@@ -50,6 +50,8 @@ import com.velocitypowered.proxy.protocol.packet.BossBarPacket;
 import com.velocitypowered.proxy.protocol.packet.ClientSettingsPacket;
 import com.velocitypowered.proxy.protocol.packet.EntityEventPacket;
 import com.velocitypowered.proxy.protocol.packet.EntityMetadataPacket;
+import com.velocitypowered.proxy.protocol.packet.EntityIdPayloadPacket;
+import com.velocitypowered.proxy.protocol.packet.PlayerActionPacket;
 import com.velocitypowered.proxy.protocol.packet.GameEventPacket;
 import com.velocitypowered.proxy.protocol.packet.HeaderAndFooterPacket;
 import com.velocitypowered.proxy.protocol.packet.JoinGamePacket;
@@ -153,6 +155,7 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
   private final Map<String, AttributeSnapshot> trackedPlayerAttributes = new ConcurrentHashMap<>();
   private @Nullable String currentDimension;
   private @Nullable Integer clientEntityId;
+  private final ClientWorldChunks worldChunks = new ClientWorldChunks();
   private boolean seamlessPlayActive;
   private long seamlessChunkWaitDeadlineNanos;
 
@@ -591,6 +594,18 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
   }
 
   @Override
+  public boolean handle(EntityIdPayloadPacket packet) {
+    if (packet instanceof PlayerActionPacket && clientEntityId != null
+        && packet.getEntityId() == clientEntityId) {
+      VelocityServerConnection destination = player.getConnectedServer();
+      if (destination != null && destination.getEntityId() != null) {
+        packet.setEntityId(destination.getEntityId());
+      }
+    }
+    return false;
+  }
+
+  @Override
   public void handleGeneric(MinecraftPacket packet) {
     VelocityServerConnection serverConnection = player.getConnectedServer();
     if (serverConnection == null) {
@@ -712,6 +727,7 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
       seamlessPlayActive = false;
       currentDimension = null;
       clientEntityId = null;
+      worldChunks.clear();
       trackedEntityIds.clear();
       trackedPlayerEffects.clear();
       trackedPlayerAttributes.clear();
@@ -739,13 +755,17 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
    */
   public void handleBackendJoinGame(JoinGamePacket joinGame, VelocityServerConnection destination) {
     final MinecraftConnection serverMc = destination.ensureConnected();
+    final int backendEntityId = joinGame.getEntityId();
+    destination.setEntityId(backendEntityId);
 
     // A CONFIG fallback calls doSwitch() and clears spawned. This branch therefore runs only
     // after FastBackendConfigSessionHandler proved the two configurations equivalent.
-    boolean seamless = canSwitchBetweenSpawnAndOverworldWithoutJoinGame(joinGame, destination);
+    boolean seamless = canSwitchWithoutJoinGame(joinGame, destination);
+    destination.applyPendingPlayTags();
     if (!spawned) {
       spawned = true;
-      clientEntityId = joinGame.getEntityId();
+      clientEntityId = ClientEntityIds.forJoin(player.getProtocolVersion(), backendEntityId);
+      joinGame.setEntityId(clientEntityId);
       player.getConnection().delayedWrite(joinGame);
       player.getPhase().onFirstJoin(player);
     } else if (seamless) {
@@ -759,25 +779,32 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
       player.getConnection().delayedWrite(GameEventPacket.changeGamemode(joinGame.getGamemode()));
       player.getConnection().delayedWrite(new GameEventPacket(
           GameEventPacket.EVENT_LIMITED_CRAFTING, joinGame.getDoLimitedCrafting() ? 1.0f : 0.0f));
-      player.getConnection().delayedWrite(new GameEventPacket(GameEventPacket.EVENT_END_RAINING, 0));
-      player.getConnection().delayedWrite(new GameEventPacket(GameEventPacket.EVENT_RAIN_LEVEL_CHANGE, 0));
-      player.getConnection().delayedWrite(new GameEventPacket(GameEventPacket.EVENT_THUNDER_LEVEL_CHANGE, 0));
+      String previousName = destination.getPreviousServer()
+          .map(previous -> previous.getServerInfo().getName()).orElse("");
+      if (!ScreenFreeSwitchPolicy.preservesWeather(previousName,
+          destination.getServerInfo().getName())) {
+        player.getConnection().delayedWrite(new GameEventPacket(GameEventPacket.EVENT_END_RAINING, 0));
+        player.getConnection().delayedWrite(new GameEventPacket(GameEventPacket.EVENT_RAIN_LEVEL_CHANGE, 0));
+        player.getConnection().delayedWrite(new GameEventPacket(GameEventPacket.EVENT_THUNDER_LEVEL_CHANGE, 0));
+      }
     } else {
       seamlessPlayActive = false;
+      worldChunks.clear();
+      clientEntityId = ClientEntityIds.forJoin(player.getProtocolVersion(), backendEntityId);
+      joinGame.setEntityId(clientEntityId);
       player.getTabList().clearAll();
       if (player.getConnection().getType() == ConnectionTypes.LEGACY_FORGE) {
         this.doSafeClientServerSwitch(joinGame);
       } else {
         this.doFastClientServerSwitch(joinGame);
       }
-      clientEntityId = joinGame.getEntityId();
       trackedEntityIds.clear();
       trackedPlayerEffects.clear();
       trackedPlayerAttributes.clear();
     }
     currentDimension = dimensionKey(joinGame.getDimension(), joinGame.getDimensionInfo());
 
-    destination.setEntityId(joinGame.getEntityId()); // used for sound api
+    // Keep the real backend ID set above; JoinGame may carry the reserved frontend ID.
     if (seamless) {
       // The client never opened Loading terrain, so acknowledge its arrival ourselves.
       serverMc.delayedWrite(ServerboundPlayerLoadedPacket.INSTANCE);
@@ -846,13 +873,9 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
     destination.completeJoin();
   }
 
-  private boolean canSwitchBetweenSpawnAndOverworldWithoutJoinGame(JoinGamePacket joinGame,
+  private boolean canSwitchWithoutJoinGame(JoinGamePacket joinGame,
       VelocityServerConnection destination) {
     if (!spawned || !server.getConfiguration().isFastServerSwitch()
-        || (player.getProtocolVersion() != ProtocolVersion.MINECRAFT_1_21_11
-            && player.getProtocolVersion() != ProtocolVersion.MINECRAFT_26_1
-            && player.getProtocolVersion() != ProtocolVersion.MINECRAFT_26_2
-            && player.getProtocolVersion() != ProtocolVersion.MINECRAFT_26_3)
         || player.getConnection().getState() != StateRegistry.PLAY
         || player.getConnection().getType() == ConnectionTypes.LEGACY_FORGE
         || currentDimension == null
@@ -860,13 +883,9 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
       return false;
     }
     String destinationName = destination.getServerInfo().getName();
-    return destination.getPreviousServer().map(previous -> {
-      String previousName = previous.getServerInfo().getName();
-      return (previousName.equalsIgnoreCase("spawn")
-          && destinationName.equalsIgnoreCase("overworld"))
-          || (previousName.equalsIgnoreCase("overworld")
-          && destinationName.equalsIgnoreCase("spawn"));
-    }).orElse(false);
+    return destination.getPreviousServer().map(previous -> ScreenFreeSwitchPolicy.allows(
+        player.getProtocolVersion(), previous.getServerInfo().getName(), destinationName))
+        .orElse(false);
   }
 
   private static String dimensionKey(int dimension, @Nullable DimensionInfo info) {
@@ -875,6 +894,7 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
   }
 
   private void clearPreviousServerState() {
+    worldChunks.unload(packet -> player.getConnection().delayedWrite(packet));
     for (TabListEntry entry : player.getTabList().getEntries()) {
       UUID id = entry.getProfile().getId();
       if (!id.equals(player.getUniqueId())) {
@@ -912,6 +932,10 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
     // The existing post-JoinGame cleanup below removes boss bars, objectives and teams.
   }
 
+  public ClientWorldChunks getWorldChunks() {
+    return worldChunks;
+  }
+
   public Set<Integer> getTrackedEntityIds() {
     return trackedEntityIds;
   }
@@ -938,6 +962,7 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
 
   public void setCurrentDimension(int dimension, @Nullable DimensionInfo info) {
     currentDimension = dimensionKey(dimension, info);
+    worldChunks.clear();
     seamlessPlayActive = false;
   }
 

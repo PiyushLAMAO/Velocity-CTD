@@ -101,7 +101,7 @@ public class ConfigSessionHandler implements MinecraftSessionHandler {
 
   // Fingerprints the registry/tag data forwarded to the client, committed as its snapshot when the
   // backend finishes, feeding the fast-transition decision.
-  private final ConfigStateSnapshot.Builder configSnapshot;
+  private ConfigStateSnapshot.Builder configSnapshot;
 
   // Guards advanceBackendToPlay; only touched on the backend event loop.
   private boolean backendAdvancedToPlay;
@@ -135,6 +135,10 @@ public class ConfigSessionHandler implements MinecraftSessionHandler {
 
   @Override
   public void activated() {
+    // A connected downstream proxy can re-enter CONFIG on the same socket.
+    // Each activation owns a new snapshot and acknowledgement cycle.
+    backendAdvancedToPlay = false;
+    configSnapshot = ConfigStateSnapshot.builder("client-" + serverConn.getServerInfo().getName());
     ConnectedPlayer player = serverConn.getPlayer();
     if (player.getProtocolVersion() == ProtocolVersion.MINECRAFT_1_20_2) {
       resourcePackToApply = player.resourcePackHandler().getFirstAppliedPack();

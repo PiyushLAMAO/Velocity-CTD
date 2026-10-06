@@ -42,6 +42,7 @@ import com.velocitypowered.proxy.protocol.packet.LoginAcknowledgedPacket;
 import com.velocitypowered.proxy.protocol.packet.LoginPluginMessagePacket;
 import com.velocitypowered.proxy.protocol.packet.LoginPluginResponsePacket;
 import com.velocitypowered.proxy.protocol.packet.ServerLoginSuccessPacket;
+import com.velocitypowered.proxy.protocol.packet.ServerboundCookieResponsePacket;
 import com.velocitypowered.proxy.protocol.packet.SetCompressionPacket;
 import com.velocitypowered.proxy.util.except.QuietRuntimeException;
 import io.netty.buffer.ByteBuf;
@@ -213,6 +214,12 @@ public class LoginSessionHandler implements MinecraftSessionHandler {
 
   @Override
   public boolean handle(ClientboundCookieRequestPacket packet) {
+    ProxyRouteAdmission admission = serverConn.getProxyAdmission();
+    if (admission != null) {
+      // Answer in LOGIN, never ask the playing client or forward its other cookies.
+      serverConn.ensureConnected().write(new ServerboundCookieResponsePacket(packet.getKey(), admission.cookie(packet.getKey())));
+      return true;
+    }
     server.getEventManager().fire(new CookieRequestEvent(serverConn.getPlayer(), packet.getKey()))
         .thenAcceptAsync(event -> {
           if (event.getResult().isAllowed()) {

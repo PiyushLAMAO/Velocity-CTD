@@ -17,6 +17,8 @@
 
 package com.velocitypowered.proxy.protocol;
 
+import static com.velocitypowered.api.network.ProtocolVersion.MINECRAFT_1_21_11;
+
 import static com.google.common.collect.Iterables.getLast;
 import static com.velocitypowered.api.network.ProtocolVersion.MINECRAFT_1_12;
 import static com.velocitypowered.api.network.ProtocolVersion.MINECRAFT_1_12_1;
@@ -66,6 +68,7 @@ import com.velocitypowered.proxy.protocol.packet.ClientboundPostEffectsPacket;
 import com.velocitypowered.proxy.protocol.packet.ClientboundSoundEntityPacket;
 import com.velocitypowered.proxy.protocol.packet.ClientboundStopSoundPacket;
 import com.velocitypowered.proxy.protocol.packet.ClientboundStoreCookiePacket;
+import com.velocitypowered.proxy.protocol.packet.CombatKillPacket;
 import com.velocitypowered.proxy.protocol.packet.DamageEventPacket;
 import com.velocitypowered.proxy.protocol.packet.DialogClearPacket;
 import com.velocitypowered.proxy.protocol.packet.DialogShowPacket;
@@ -76,6 +79,9 @@ import com.velocitypowered.proxy.protocol.packet.EntityAnimationPacket;
 import com.velocitypowered.proxy.protocol.packet.EntityEffectPacket;
 import com.velocitypowered.proxy.protocol.packet.EntityEventPacket;
 import com.velocitypowered.proxy.protocol.packet.EntityMetadataPacket;
+import com.velocitypowered.proxy.protocol.packet.EntityCameraPacket;
+import com.velocitypowered.proxy.protocol.packet.ForgetChunkPacket;
+import com.velocitypowered.proxy.protocol.packet.PlayerActionPacket;
 import com.velocitypowered.proxy.protocol.packet.EntityVelocityPacket;
 import com.velocitypowered.proxy.protocol.packet.GameEventPacket;
 import com.velocitypowered.proxy.protocol.packet.HandshakePacket;
@@ -450,6 +456,18 @@ public enum StateRegistry {
           map(0x0F, MINECRAFT_1_21_6, false),
           map(0x10, MINECRAFT_26_1, false));
 
+      // IDs verified against the installed primary codecs for protocols 774..777.
+      clientbound.register(ForgetChunkPacket.class, ForgetChunkPacket::new,
+          map(0x25, MINECRAFT_1_21_11, false),
+          map(0x26, MINECRAFT_26_3, false));
+      clientbound.register(EntityCameraPacket.class, EntityCameraPacket::new,
+          map(0x5B, MINECRAFT_1_21_11, false),
+          map(0x5D, MINECRAFT_26_1, false),
+          map(0x5F, MINECRAFT_26_3, false));
+      serverbound.register(PlayerActionPacket.class, PlayerActionPacket::new,
+          map(0x29, MINECRAFT_1_21_11, false),
+          map(0x2A, MINECRAFT_26_1, false));
+
       // Economy lab: decode entity cleanup packets from 1.21.11 through 26.3.
       // The 26.1 mappings prevent older packet IDs from bleeding into 26.x clients.
       clientbound.register(SpawnEntityPacket.class, SpawnEntityPacket::new,
@@ -467,6 +485,10 @@ public enum StateRegistry {
           map(0x29, MINECRAFT_1_21_9, false),
           map(0x2A, MINECRAFT_26_1, false),
           map(0x2B, MINECRAFT_26_3, false));
+      clientbound.register(CombatKillPacket.class, CombatKillPacket::new,
+          map(0x42, MINECRAFT_1_21_9, false),
+          map(0x44, MINECRAFT_26_1, false),
+          map(0x45, MINECRAFT_26_3, false));
       clientbound.register(RemoveEntitiesPacket.class, RemoveEntitiesPacket::new,
           map(0x4B, MINECRAFT_1_21_9, false),
           map(0x4D, MINECRAFT_26_1, false),
@@ -969,6 +991,10 @@ public enum StateRegistry {
           map(0x7F, MINECRAFT_1_21_9, false),
           map(0x81, MINECRAFT_26_1, false),
           map(0x84, MINECRAFT_26_3, false));
+      clientbound.register(TagsUpdatePacket.class, TagsUpdatePacket::new,
+          map(0x84, MINECRAFT_1_21_11, false),
+          map(0x86, MINECRAFT_26_1, false),
+          map(0x89, MINECRAFT_26_3, false));
       clientbound.register(
           ClientboundCustomReportDetailsPacket.class,
           ClientboundCustomReportDetailsPacket::new,

@@ -69,11 +69,13 @@ public final class ConfigStateSnapshot {
   private static final @Nullable String DUMP_DIR = System.getProperty("velocityctd.fasttransition.dumpDir");
 
   private final byte[] fingerprint;
+  private final byte[] playTagsFingerprint;
   private final List<String> entries;
   private final boolean complete;
 
-  private ConfigStateSnapshot(byte[] fingerprint, List<String> entries, boolean complete) {
+  private ConfigStateSnapshot(byte[] fingerprint, byte[] playTagsFingerprint, List<String> entries, boolean complete) {
     this.fingerprint = fingerprint;
+    this.playTagsFingerprint = playTagsFingerprint;
     this.entries = entries;
     this.complete = complete;
   }
@@ -83,6 +85,11 @@ public final class ConfigStateSnapshot {
         && Arrays.equals(this.fingerprint, other.fingerprint);
   }
 
+  /** Tags can change in PLAY only after all registries, features and known packs match exactly. */
+  public boolean matchesWithPlayTagUpdate(@Nullable ConfigStateSnapshot other) {
+    return other != null && complete && other.complete
+        && Arrays.equals(playTagsFingerprint, other.playTagsFingerprint);
+  }
   public List<String> entries() {
     return entries;
   }
@@ -324,8 +331,10 @@ public final class ConfigStateSnapshot {
 
     public ConfigStateSnapshot build() {
       MessageDigest digest;
+      MessageDigest playTagsDigest;
       try {
         digest = MessageDigest.getInstance("SHA-256");
+        playTagsDigest = MessageDigest.getInstance("SHA-256");
       } catch (NoSuchAlgorithmException e) {
         throw new AssertionError("SHA-256 not available", e);
       }
@@ -337,6 +346,7 @@ public final class ConfigStateSnapshot {
         byte[] data = registryData.get(name);
         entries.add(describe((byte) 'R', name, data, false));
         hashInto(digest, (byte) 'R', data);
+        hashInto(playTagsDigest, (byte) 'R', data);
       }
       if (tagsData != null) {
         entries.add(describe((byte) 'T', "tags", tagsData, false));
@@ -345,14 +355,16 @@ public final class ConfigStateSnapshot {
       if (featuresData != null) {
         entries.add(describe((byte) 'F', "features", featuresData, false));
         hashInto(digest, (byte) 'F', featuresData);
+        hashInto(playTagsDigest, (byte) 'F', featuresData);
       }
       if (knownPacksData != null) {
         entries.add(describe((byte) 'K', "known-packs", knownPacksData, false));
         hashInto(digest, (byte) 'K', knownPacksData);
+        hashInto(playTagsDigest, (byte) 'K', knownPacksData);
       }
       boolean complete = !registryData.isEmpty() && tagsData != null
           && featuresData != null && knownPacksData != null;
-      return new ConfigStateSnapshot(digest.digest(), List.copyOf(entries), complete);
+      return new ConfigStateSnapshot(digest.digest(), playTagsDigest.digest(), List.copyOf(entries), complete);
     }
   }
 }

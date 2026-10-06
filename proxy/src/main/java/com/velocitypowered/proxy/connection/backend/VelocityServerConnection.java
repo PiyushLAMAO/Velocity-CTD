@@ -38,6 +38,8 @@ import com.velocitypowered.proxy.connection.MinecraftConnectionAssociation;
 import com.velocitypowered.proxy.connection.MinecraftSessionHandler;
 import com.velocitypowered.proxy.connection.PlayerDataForwarding;
 import com.velocitypowered.proxy.connection.client.ConnectedPlayer;
+import com.velocitypowered.proxy.protocol.packet.config.TagsUpdatePacket;
+import com.velocityctd.proxy.connection.fasttransition.ConfigStateSnapshot;
 import com.velocitypowered.proxy.connection.forge.modern.ModernForgeConnectionType;
 import com.velocitypowered.proxy.connection.util.ConnectionRequestResults.Impl;
 import com.velocitypowered.proxy.protocol.StateRegistry;
@@ -69,6 +71,9 @@ public class VelocityServerConnection implements MinecraftConnectionAssociation,
   private final ConnectedPlayer proxyPlayer;
   private final VelocityServer server;
   private @Nullable MinecraftConnection connection;
+  private final @Nullable ProxyRouteAdmission proxyAdmission;
+  private @Nullable TagsUpdatePacket pendingPlayTags;
+  private @Nullable ConfigStateSnapshot pendingConfigSnapshot;
   private boolean hasCompletedJoin = false;
   private boolean clientLoaded = false; // 1.21.4+
   private boolean gracefulDisconnect = false;
@@ -89,10 +94,30 @@ public class VelocityServerConnection implements MinecraftConnectionAssociation,
   public VelocityServerConnection(VelocityRegisteredServer registeredServer,
       @Nullable VelocityRegisteredServer previousServer,
       ConnectedPlayer proxyPlayer, VelocityServer server) {
+    this(registeredServer, previousServer, proxyPlayer, server, null);
+  }
+  public VelocityServerConnection(VelocityRegisteredServer registeredServer,
+      @Nullable VelocityRegisteredServer previousServer, ConnectedPlayer proxyPlayer,
+      VelocityServer server, @Nullable ProxyRouteAdmission admission) {
     this.registeredServer = registeredServer;
     this.previousServer = previousServer;
     this.proxyPlayer = proxyPlayer;
     this.server = server;
+    this.proxyAdmission = admission;
+  }
+  public @Nullable ProxyRouteAdmission getProxyAdmission() { return proxyAdmission; }
+  public void setPendingPlayTags(TagsUpdatePacket tags,
+      ConfigStateSnapshot snapshot) {
+    pendingPlayTags = tags;
+    pendingConfigSnapshot = snapshot;
+  }
+  public void applyPendingPlayTags() {
+    if (pendingPlayTags != null) {
+      proxyPlayer.getConnection().write(pendingPlayTags);
+      proxyPlayer.setClientConfigSnapshot(pendingConfigSnapshot);
+      pendingPlayTags = null;
+      pendingConfigSnapshot = null;
+    }
   }
 
   /**
@@ -178,7 +203,7 @@ public class VelocityServerConnection implements MinecraftConnectionAssociation,
                 .getHostString();
 
     HandshakePacket handshake = new HandshakePacket();
-    handshake.setIntent(HandshakeIntent.LOGIN);
+    handshake.setIntent(proxyAdmission == null ? HandshakeIntent.LOGIN : HandshakeIntent.TRANSFER);
     handshake.setProtocolVersion(protocolVersion);
     if (forwardingMode == PlayerInfoForwarding.LEGACY) {
       handshake.setServerAddress(createLegacyForwardingAddress());

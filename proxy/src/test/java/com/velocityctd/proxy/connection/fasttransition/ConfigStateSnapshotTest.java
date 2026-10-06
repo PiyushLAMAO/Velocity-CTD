@@ -72,6 +72,17 @@ class ConfigStateSnapshotTest {
     assertTrue(builder.build().matches(builder.build()));
   }
 
+  @Test
+  void playTagUpdateStillRequiresExactRegistriesFeaturesAndPacks() {
+    var original = snapshot("minecraft:dimension_type", 7, "minecraft:vanilla", "core", false);
+    assertTrue(original.matchesWithPlayTagUpdate(snapshot("minecraft:dimension_type", 8, "minecraft:vanilla", "core", false)));
+    assertFalse(original.matchesWithPlayTagUpdate(snapshot("minecraft:dialog", 7, "minecraft:vanilla", "core", false)));
+    assertFalse(original.matchesWithPlayTagUpdate(snapshot("minecraft:dimension_type", 7, "minecraft:trade_rebalance", "core", false)));
+    assertFalse(original.matchesWithPlayTagUpdate(snapshot("minecraft:dimension_type", 7, "minecraft:vanilla", "other", false)));
+    assertFalse(ConfigStateSnapshot.builder().build().matchesWithPlayTagUpdate(original));
+    assertFalse(original.matchesWithPlayTagUpdate(null));
+  }
+
   private static ConfigStateSnapshot snapshot(String registry, int tagId, String feature,
                                               String pack, boolean reverseNbt) {
     ConfigStateSnapshot.Builder builder = ConfigStateSnapshot.builder();

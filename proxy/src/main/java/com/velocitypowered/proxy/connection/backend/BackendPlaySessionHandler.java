@@ -43,6 +43,7 @@ import com.velocitypowered.proxy.connection.util.ConnectionMessages;
 import com.velocitypowered.proxy.protocol.MinecraftPacket;
 import com.velocitypowered.proxy.protocol.StateRegistry;
 import com.velocitypowered.proxy.protocol.netty.MinecraftDecoder;
+import com.velocitypowered.proxy.protocol.netty.ProxyJoinPacketQueue;
 import com.velocitypowered.proxy.protocol.netty.MinecraftVarintFrameDecoder;
 import com.velocitypowered.proxy.protocol.packet.AvailableCommandsPacket;
 import com.velocitypowered.proxy.protocol.packet.BossBarPacket;
@@ -56,6 +57,8 @@ import com.velocitypowered.proxy.protocol.packet.EntityEffectPacket;
 import com.velocitypowered.proxy.protocol.packet.EntityEventPacket;
 import com.velocitypowered.proxy.protocol.packet.EntityIdPayloadPacket;
 import com.velocitypowered.proxy.protocol.packet.GameEventPacket;
+import com.velocitypowered.proxy.protocol.packet.ForgetChunkPacket;
+import com.velocitypowered.proxy.connection.client.ClientEntityIds;
 import com.velocitypowered.proxy.protocol.packet.HeaderAndFooterPacket;
 import com.velocitypowered.proxy.protocol.packet.JoinGamePacket;
 import com.velocitypowered.proxy.protocol.packet.KeepAlivePacket;
@@ -110,7 +113,7 @@ public class BackendPlaySessionHandler implements MinecraftSessionHandler {
 
   private final VelocityServer server;
   private final VelocityServerConnection serverConn;
-  private final ClientPlaySessionHandler playerSessionHandler;
+  private ClientPlaySessionHandler playerSessionHandler;
   private final MinecraftConnection playerConnection;
   private final BungeeCordMessageResponder bungeecordMessageResponder;
   private boolean exceptionTriggered = false;
@@ -187,9 +190,15 @@ public class BackendPlaySessionHandler implements MinecraftSessionHandler {
 
   @Override
   public boolean handle(JoinGamePacket packet) {
-    // We receive this if the connection is reconfigured
-    packet.setOnlineMode(serverConn.getPlayer().isOnlineMode());
-    return false; // forward
+    // CONFIG replaced the frontend PLAY handler while retaining this backend socket.
+    // Refresh its state and process JoinGame exactly as an ordinary world join.
+    if (playerConnection.getActiveSessionHandler() instanceof ClientPlaySessionHandler play) {
+      playerSessionHandler = play;
+      packet.setOnlineMode(serverConn.getPlayer().isOnlineMode());
+      play.handleBackendJoinGame(packet, serverConn);
+      return true;
+    }
+    throw new IllegalStateException("Backend JoinGame reached a client still in configuration");
   }
 
   @Override
@@ -207,6 +216,13 @@ public class BackendPlaySessionHandler implements MinecraftSessionHandler {
 
   @Override
   public boolean handle(SpawnEntityPacket packet) {
+    Integer self = playerSessionHandler.getClientEntityId();
+    Integer backendSelf = serverConn.getEntityId();
+    if (self != null && self == ClientEntityIds.SELF
+        && (packet.getEntityId() == self || backendSelf != null && packet.getEntityId() == backendSelf)) {
+      // A backend must never replace the retained local player's entity.
+      return true;
+    }
     playerSessionHandler.getTrackedEntityIds().add(packet.getEntityId());
     return false;
   }
@@ -214,6 +230,14 @@ public class BackendPlaySessionHandler implements MinecraftSessionHandler {
   @Override
   public boolean handle(RemoveEntitiesPacket packet) {
     playerSessionHandler.getTrackedEntityIds().removeAll(packet.getEntityIds());
+    Integer self = playerSessionHandler.getClientEntityId();
+    if (self != null && self == ClientEntityIds.SELF && packet.getEntityIds().contains(self)) {
+      var otherEntities = packet.getEntityIds().stream().filter(id -> !id.equals(self)).toList();
+      if (!otherEntities.isEmpty()) {
+        playerConnection.delayedWrite(new RemoveEntitiesPacket(otherEntities));
+      }
+      return true;
+    }
     return false;
   }
 
@@ -407,6 +431,19 @@ public class BackendPlaySessionHandler implements MinecraftSessionHandler {
 
   @Override
   public boolean handle(PluginMessagePacket packet) {
+    if (serverConn.getProxyAdmission() != null
+        && ProxyJoinPacketQueue.READY_CHANNEL.equals(packet.getChannel())) {
+      if (packet.content().readableBytes() == 1
+          && packet.content().getByte(packet.content().readerIndex()) == 1) {
+        var context = serverConn.ensureConnected().getChannel().pipeline()
+            .context(ProxyJoinPacketQueue.NAME);
+        if (context != null) {
+          ((ProxyJoinPacketQueue) context.handler()).proxyReady(context);
+        }
+      }
+      // This internal readiness acknowledgement never reaches the playing client.
+      return true;
+    }
     if (bungeecordMessageResponder.process(packet)) {
       return true;
     }
@@ -456,6 +493,15 @@ public class BackendPlaySessionHandler implements MinecraftSessionHandler {
 
   @Override
   public boolean handle(TabCompleteResponsePacket packet) {
+    if (serverConn.getProxyAdmission() != null
+        && packet.getTransactionId() == ProxyJoinPacketQueue.PROBE_TRANSACTION) {
+      var context = serverConn.ensureConnected().getChannel().pipeline()
+          .context(ProxyJoinPacketQueue.NAME);
+      if (context != null) {
+        ((ProxyJoinPacketQueue) context.handler()).complete(context);
+      }
+      return true;
+    }
     playerSessionHandler.handleTabCompleteResponse(packet);
     return true;
   }
@@ -580,6 +626,9 @@ public class BackendPlaySessionHandler implements MinecraftSessionHandler {
 
   @Override
   public void handleGeneric(MinecraftPacket packet) {
+    if (packet instanceof ForgetChunkPacket forgotten) {
+      playerSessionHandler.getWorldChunks().forget(forgotten.getPosition());
+    }
     if (packet instanceof PluginMessagePacket pluginMessage) {
       pluginMessage.retain();
     }
@@ -593,8 +642,14 @@ public class BackendPlaySessionHandler implements MinecraftSessionHandler {
 
   @Override
   public void handleUnknown(ByteBuf buf) {
-    boolean huge = buf.readableBytes() > LARGE_PACKET_THRESHOLD;
-    playerConnection.delayedWrite(buf.retain());
+    playerSessionHandler.getWorldChunks().observe(buf, playerConnection.getProtocolVersion());
+    // Entity sounds are encode-only packets in Velocity and arrive here as raw frames.
+    ByteBuf rewritten = BackendSoundEntityRewriter.rewrite(buf,
+        playerConnection.getProtocolVersion(), serverConn.getEntityId(),
+        playerSessionHandler.getClientEntityId());
+    ByteBuf outgoing = rewritten == null ? buf.retain() : rewritten;
+    boolean huge = outgoing.readableBytes() > LARGE_PACKET_THRESHOLD;
+    playerConnection.delayedWrite(outgoing);
     if (huge || ++packetsFlushed >= MAXIMUM_PACKETS_TO_FLUSH) {
       playerConnection.flush();
       packetsFlushed = 0;

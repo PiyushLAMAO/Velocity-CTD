@@ -78,6 +78,7 @@ import com.velocitypowered.proxy.command.CommandGraphInjector;
 import com.velocitypowered.proxy.connection.MinecraftConnection;
 import com.velocitypowered.proxy.connection.MinecraftConnectionAssociation;
 import com.velocitypowered.proxy.connection.backend.VelocityServerConnection;
+import com.velocitypowered.proxy.connection.backend.ProxyRouteAdmission;
 import com.velocitypowered.proxy.connection.player.bossbar.BossBarManager;
 import com.velocitypowered.proxy.connection.player.bundle.BundleDelimiterHandler;
 import com.velocitypowered.proxy.connection.player.resourcepack.ResourcePackTransfer;
@@ -808,6 +809,15 @@ public class ConnectedPlayer implements MinecraftConnectionAssociation, Player, 
     return createConnectionRequest((VelocityRegisteredServer) server);
   }
 
+  /** Opens an admitted local proxy route while retaining the client connection. */
+  public ConnectionRequestBuilder createProxyConnectionRequest(RegisteredServer target, byte[] ticket) {
+    VelocityRegisteredServer destination = (VelocityRegisteredServer) target;
+    java.net.InetSocketAddress address = destination.getServerInfo().getAddress();
+    Preconditions.checkArgument(ProxyRouteTargets.isAllowed(address), "Proxy route target is not permitted");
+    Preconditions.checkArgument(destination.getPlayerInfoForwardingMode() == com.velocitypowered.api.proxy.server.PlayerInfoForwarding.NONE, "Proxy routes use opaque admission");
+    Preconditions.checkArgument(getProtocolVersion().noLessThan(ProtocolVersion.MINECRAFT_1_21_11), "Unsupported gateway protocol");
+    return new ConnectionRequestBuilderImpl(destination, this.connectedServer, new ProxyRouteAdmission(ticket));
+  }
   private ConnectionRequestBuilder createConnectionRequest(VelocityRegisteredServer server) {
     return new ConnectionRequestBuilderImpl(server, this.connectedServer);
   }
@@ -1676,7 +1686,13 @@ public class ConnectedPlayer implements MinecraftConnectionAssociation, Player, 
       return;
     }
 
-    connection.write(new ClientboundSoundEntityPacket(sound, null, soundEmitterServerConn.getEntityId()));
+    Integer emitterId = soundEmitterServerConn.getEntityId();
+    if (soundEmitterServerConn == soundTargetServerConn
+        && connection.getActiveSessionHandler() instanceof ClientPlaySessionHandler play
+        && play.getClientEntityId() != null) {
+      emitterId = play.getClientEntityId();
+    }
+    connection.write(new ClientboundSoundEntityPacket(sound, null, emitterId));
   }
 
   @Override
@@ -2122,12 +2138,19 @@ public class ConnectedPlayer implements MinecraftConnectionAssociation, Player, 
 
     private final @Nullable VelocityRegisteredServer previousServer;
 
+    private @Nullable ProxyRouteAdmission proxyAdmission;
+
     ConnectionRequestBuilderImpl(VelocityRegisteredServer toConnect,
                                  @Nullable VelocityServerConnection previousConnection) {
       this.toConnect = Preconditions.checkNotNull(toConnect, "info");
       this.previousServer = previousConnection == null ? null : previousConnection.getServer();
     }
 
+    ConnectionRequestBuilderImpl(VelocityRegisteredServer toConnect,
+        @Nullable VelocityServerConnection previousConnection, ProxyRouteAdmission admission) {
+      this(toConnect, previousConnection);
+      this.proxyAdmission = admission;
+    }
     @Override
     public VelocityRegisteredServer getServer() {
       return toConnect;
@@ -2177,8 +2200,12 @@ public class ConnectedPlayer implements MinecraftConnectionAssociation, Player, 
             return completedFuture(plainResult(ConnectionRequestBuilder.Status.CONNECTION_CANCELLED, realDestination));
           }
 
+          // Never release admission to a redirected endpoint.
+          if (proxyAdmission != null && realDestination != toConnect) {
+            return completedFuture(plainResult(ConnectionRequestBuilder.Status.CONNECTION_CANCELLED, toConnect));
+          }
           VelocityServerConnection con = new VelocityServerConnection(
-              realDestination, previousServer, ConnectedPlayer.this, server);
+              realDestination, previousServer, ConnectedPlayer.this, server, proxyAdmission);
           connectionInFlight = con;
 
           if (connectedServer == null) {

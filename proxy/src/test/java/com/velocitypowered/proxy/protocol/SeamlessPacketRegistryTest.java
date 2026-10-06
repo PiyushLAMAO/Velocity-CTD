@@ -21,6 +21,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import com.velocitypowered.api.network.ProtocolVersion;
 import com.velocitypowered.proxy.protocol.ProtocolUtils.Direction;
+import com.velocitypowered.proxy.protocol.packet.CombatKillPacket;
 import com.velocitypowered.proxy.protocol.packet.DamageEventPacket;
 import com.velocitypowered.proxy.protocol.packet.EntityAnimationPacket;
 import com.velocitypowered.proxy.protocol.packet.EntityEffectPacket;
@@ -50,6 +51,7 @@ class SeamlessPacketRegistryTest {
     assertEquals(0x22, registry.getPacketId(new EntityEventPacket()));
     assertEquals(0x26, registry.getPacketId(new GameEventPacket()));
     assertEquals(0x29, registry.getPacketId(new HurtAnimationPacket()));
+    assertEquals(0x42, registry.getPacketId(new CombatKillPacket()));
     assertEquals(0x4B, registry.getPacketId(new RemoveEntitiesPacket()));
     assertEquals(0x4C, registry.getPacketId(new RemoveEntityEffectPacket()));
     assertEquals(0x61, registry.getPacketId(new EntityMetadataPacket()));
@@ -72,7 +74,8 @@ class SeamlessPacketRegistryTest {
       assertEquals(0x22, registry.getPacketId(new EntityEventPacket()));
       assertEquals(0x26, registry.getPacketId(new GameEventPacket()));
       assertEquals(0x2A, registry.getPacketId(new HurtAnimationPacket()));
-      assertEquals(0x4D, registry.getPacketId(new RemoveEntitiesPacket()));
+      assertEquals(0x44, registry.getPacketId(new CombatKillPacket()));
+    assertEquals(0x4D, registry.getPacketId(new RemoveEntitiesPacket()));
       assertEquals(0x4E, registry.getPacketId(new RemoveEntityEffectPacket()));
       assertEquals(0x63, registry.getPacketId(new EntityMetadataPacket()));
       assertEquals(0x65, registry.getPacketId(new EntityVelocityPacket()));
@@ -91,6 +94,7 @@ class SeamlessPacketRegistryTest {
     assertEquals(0x22, registry.getPacketId(new EntityEventPacket()));
     assertEquals(0x27, registry.getPacketId(new GameEventPacket()));
     assertEquals(0x2B, registry.getPacketId(new HurtAnimationPacket()));
+    assertEquals(0x45, registry.getPacketId(new CombatKillPacket()));
     assertEquals(0x4E, registry.getPacketId(new RemoveEntitiesPacket()));
     assertEquals(0x4F, registry.getPacketId(new RemoveEntityEffectPacket()));
     assertEquals(0x65, registry.getPacketId(new EntityMetadataPacket()));
