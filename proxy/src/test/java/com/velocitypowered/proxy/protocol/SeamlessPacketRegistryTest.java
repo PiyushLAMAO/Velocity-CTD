@@ -37,14 +37,15 @@ import com.velocitypowered.proxy.protocol.packet.UpdateAttributesPacket;
 import org.junit.jupiter.api.Test;
 
 /**
- * Versioned IDs from the CTD/Conduit registry and local Mojang-mapped 26.3 protocol.
- * A misplaced codec would otherwise corrupt ordinary play packets for every client.
+ * Versioned IDs from the CTD/Conduit registry and local Mojang-mapped 26.3 protocol. A misplaced
+ * codec would otherwise corrupt ordinary play packets for every client.
  */
 class SeamlessPacketRegistryTest {
   @Test
   void translated1_21_11EntityAndGameEventIds() {
-    var registry = StateRegistry.PLAY.getProtocolRegistry(Direction.CLIENTBOUND,
-        ProtocolVersion.MINECRAFT_1_21_11);
+    var registry =
+        StateRegistry.PLAY.getProtocolRegistry(
+            Direction.CLIENTBOUND, ProtocolVersion.MINECRAFT_1_21_11);
     assertEquals(0x01, registry.getPacketId(new SpawnEntityPacket()));
     assertEquals(0x02, registry.getPacketId(new EntityAnimationPacket()));
     assertEquals(0x19, registry.getPacketId(new DamageEventPacket()));
@@ -65,8 +66,8 @@ class SeamlessPacketRegistryTest {
     assertEquals(ProtocolVersion.MINECRAFT_26_1, ProtocolVersion.getVersionByName("26.1"));
     assertEquals(ProtocolVersion.MINECRAFT_26_1, ProtocolVersion.getVersionByName("26.1.1"));
     assertEquals(ProtocolVersion.MINECRAFT_26_1, ProtocolVersion.getVersionByName("26.1.2"));
-    for (ProtocolVersion version : new ProtocolVersion[]{
-        ProtocolVersion.MINECRAFT_26_1, ProtocolVersion.MINECRAFT_26_2}) {
+    for (ProtocolVersion version :
+        new ProtocolVersion[] {ProtocolVersion.MINECRAFT_26_1, ProtocolVersion.MINECRAFT_26_2}) {
       var registry = StateRegistry.PLAY.getProtocolRegistry(Direction.CLIENTBOUND, version);
       assertEquals(0x01, registry.getPacketId(new SpawnEntityPacket()));
       assertEquals(0x02, registry.getPacketId(new EntityAnimationPacket()));
@@ -75,7 +76,7 @@ class SeamlessPacketRegistryTest {
       assertEquals(0x26, registry.getPacketId(new GameEventPacket()));
       assertEquals(0x2A, registry.getPacketId(new HurtAnimationPacket()));
       assertEquals(0x44, registry.getPacketId(new CombatKillPacket()));
-    assertEquals(0x4D, registry.getPacketId(new RemoveEntitiesPacket()));
+      assertEquals(0x4D, registry.getPacketId(new RemoveEntitiesPacket()));
       assertEquals(0x4E, registry.getPacketId(new RemoveEntityEffectPacket()));
       assertEquals(0x63, registry.getPacketId(new EntityMetadataPacket()));
       assertEquals(0x65, registry.getPacketId(new EntityVelocityPacket()));
@@ -86,8 +87,9 @@ class SeamlessPacketRegistryTest {
 
   @Test
   void native26_3EntityAndGameEventIds() {
-    var registry = StateRegistry.PLAY.getProtocolRegistry(Direction.CLIENTBOUND,
-        ProtocolVersion.MINECRAFT_26_3);
+    var registry =
+        StateRegistry.PLAY.getProtocolRegistry(
+            Direction.CLIENTBOUND, ProtocolVersion.MINECRAFT_26_3);
     assertEquals(0x01, registry.getPacketId(new SpawnEntityPacket()));
     assertEquals(0x02, registry.getPacketId(new EntityAnimationPacket()));
     assertEquals(0x19, registry.getPacketId(new DamageEventPacket()));

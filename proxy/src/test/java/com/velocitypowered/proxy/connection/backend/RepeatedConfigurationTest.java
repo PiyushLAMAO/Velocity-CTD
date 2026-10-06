@@ -17,8 +17,17 @@
 
 package com.velocitypowered.proxy.connection.backend;
 
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
+import static org.mockito.Mockito.any;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
+
 import com.velocitypowered.api.network.ProtocolVersion;
 import com.velocitypowered.api.proxy.server.ServerInfo;
 import com.velocitypowered.proxy.VelocityServer;
@@ -38,16 +47,30 @@ class RepeatedConfigurationTest {
     var destination = mock(VelocityServerConnection.class);
     var player = mock(ConnectedPlayer.class, RETURNS_DEEP_STUBS);
     var connection = mock(MinecraftConnection.class);
-    when(destination.getServerInfo()).thenReturn(new ServerInfo("economy-route",
-        new InetSocketAddress("127.0.0.1", 25690)));
+    when(destination.getServerInfo())
+        .thenReturn(new ServerInfo("economy-route", new InetSocketAddress("127.0.0.1", 25690)));
     when(destination.getConnection()).thenReturn(connection);
+    var channel =
+        new io.netty.channel.embedded.EmbeddedChannel(
+            new com.velocitypowered.proxy.protocol.netty.MinecraftDecoder(
+                com.velocitypowered.proxy.protocol.ProtocolUtils.Direction.CLIENTBOUND));
+    when(connection.getChannel()).thenReturn(channel);
+    when(connection.getProtocolVersion()).thenReturn(ProtocolVersion.MINECRAFT_1_20_5);
+    doAnswer(
+            call -> {
+              ((Runnable) call.getArgument(0)).run();
+              return null;
+            })
+        .when(connection)
+        .holdInboundDuring(any(Runnable.class));
     when(destination.getPlayer()).thenReturn(player);
     when(player.getConnectedServer()).thenReturn(destination);
     when(player.getProtocolVersion()).thenReturn(ProtocolVersion.MINECRAFT_1_20_5);
     doReturn(net.kyori.adventure.text.Component.empty()).when(player).getPlayerListHeader();
     doReturn(net.kyori.adventure.text.Component.empty()).when(player).getPlayerListFooter();
     var config = new ConfigSessionHandler(server, destination, new CompletableFuture<>());
-    var advance = ConfigSessionHandler.class.getDeclaredMethod("advanceBackendToPlay", boolean.class);
+    var advance =
+        ConfigSessionHandler.class.getDeclaredMethod("advanceBackendToPlay", boolean.class);
     advance.setAccessible(true);
     config.activated();
     advance.invoke(config, false);
@@ -57,6 +80,7 @@ class RepeatedConfigurationTest {
     advance.invoke(config, false);
     advance.invoke(config, false);
     verify(connection, times(2)).write(FinishedUpdatePacket.INSTANCE);
+    channel.finishAndReleaseAll();
   }
 
   @Test

@@ -1,6 +1,28 @@
+/*
+ * Copyright (C) 2026 Velocity Contributors
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 package com.velocitypowered.proxy.connection.backend;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+
 import com.velocitypowered.api.network.ProtocolVersion;
 import com.velocitypowered.proxy.protocol.ProtocolUtils;
 import io.netty.buffer.ByteBuf;
@@ -14,76 +36,156 @@ class BackendPassengerEntityRewriterTest {
     ProtocolUtils.writeVarInt(frame, 0x6D);
     ProtocolUtils.writeVarInt(frame, vehicle);
     ProtocolUtils.writeVarInt(frame, passengers.length);
-    for (int passenger : passengers) ProtocolUtils.writeVarInt(frame, passenger);
+    for (int passenger : passengers) {
+      ProtocolUtils.writeVarInt(frame, passenger);
+    }
     return frame;
   }
 
-  @Test void riderIdIsTranslatedAndBoatAndSecondPassengerArePreserved() {
-    for (int[] passengers : new int[][]{{300}, {300, 42}, {42, 300}}) {
-      ByteBuf input=packet(99,passengers);ByteBuf output=null;
-      int[] expectedPassengers=passengers.clone();
-      for(int i=0;i<expectedPassengers.length;i++) if(expectedPassengers[i]==300) expectedPassengers[i]=Integer.MAX_VALUE;
-      ByteBuf expected=packet(99,expectedPassengers);
-      byte[] original=ByteBufUtil.getBytes(input);
+  @Test
+  void riderIdIsTranslatedAndBoatAndSecondPassengerArePreserved() {
+    for (int[] passengers : new int[][] {{300}, {300, 42}, {42, 300}}) {
+      ByteBuf input = packet(99, passengers);
+      ByteBuf output = null;
+      int[] expectedPassengers = passengers.clone();
+      for (int i = 0; i < expectedPassengers.length; i++) {
+        if (expectedPassengers[i] == 300) {
+          expectedPassengers[i] = Integer.MAX_VALUE;
+        }
+      }
+      ByteBuf expected = packet(99, expectedPassengers);
+      byte[] original = ByteBufUtil.getBytes(input);
       try {
-        output=BackendSoundEntityRewriter.forward(input,ProtocolVersion.MINECRAFT_26_3,300,Integer.MAX_VALUE);
-        assertArrayEquals(ByteBufUtil.getBytes(expected),ByteBufUtil.getBytes(output));
-        assertArrayEquals(original,ByteBufUtil.getBytes(input));
-        assertEquals(0,input.readerIndex());assertEquals(1,input.refCnt());assertEquals(1,output.refCnt());
-      } finally {input.release();expected.release();if(output!=null)output.release();}
+        output =
+            BackendSoundEntityRewriter.forward(
+                input, ProtocolVersion.MINECRAFT_26_3, 300, Integer.MAX_VALUE);
+        assertArrayEquals(ByteBufUtil.getBytes(expected), ByteBufUtil.getBytes(output));
+        assertArrayEquals(original, ByteBufUtil.getBytes(input));
+        assertEquals(0, input.readerIndex());
+        assertEquals(1, input.refCnt());
+        assertEquals(1, output.refCnt());
+      } finally {
+        input.release();
+        expected.release();
+        if (output != null) {
+          output.release();
+        }
+      }
     }
   }
 
-  @Test void emptyDismountAndOtherPlayersBoatPassThroughWithExactlyOneRetainedReference() {
-    for(int[] passengers:new int[][]{{},{42},{42,43}}) {
-      ByteBuf input=packet(99,passengers);ByteBuf output=null;
+  @Test
+  void emptyDismountAndOtherPlayersBoatPassThroughWithExactlyOneRetainedReference() {
+    for (int[] passengers : new int[][] {{}, {42}, {42, 43}}) {
+      ByteBuf input = packet(99, passengers);
+      ByteBuf output = null;
       try {
-        output=BackendSoundEntityRewriter.forward(input,ProtocolVersion.MINECRAFT_26_3,300,Integer.MAX_VALUE);
-        assertSame(input,output);assertEquals(2,input.refCnt());
-      } finally {if(output!=null)output.release();input.release();}
+        output =
+            BackendSoundEntityRewriter.forward(
+                input, ProtocolVersion.MINECRAFT_26_3, 300, Integer.MAX_VALUE);
+        assertSame(input, output);
+        assertEquals(2, input.refCnt());
+      } finally {
+        if (output != null) {
+          output.release();
+        }
+        input.release();
+      }
     }
   }
 
-  @Test void matchesAcrossVarintGrowthShrinkVehicleReferencesAndNonzeroReaderIndex() {
-    for(int[] ids:new int[][]{{1,Integer.MAX_VALUE},{Integer.MAX_VALUE,1},{128,16384}}) {
-      ByteBuf body=packet(ids[0],42,ids[0]);ByteBuf expected=packet(ids[1],42,ids[1]);
-      ByteBuf storage=Unpooled.buffer().writeLong(123).writeBytes(body);storage.readerIndex(8);ByteBuf output=null;
+  @Test
+  void matchesAcrossVarintGrowthShrinkVehicleReferencesAndNonzeroReaderIndex() {
+    for (int[] ids : new int[][] {{1, Integer.MAX_VALUE}, {Integer.MAX_VALUE, 1}, {128, 16384}}) {
+      ByteBuf body = packet(ids[0], 42, ids[0]);
+      ByteBuf expected = packet(ids[1], 42, ids[1]);
+      ByteBuf storage = Unpooled.buffer().writeLong(123).writeBytes(body);
+      storage.readerIndex(8);
+      ByteBuf output = null;
       try {
-        output=BackendPassengerEntityRewriter.rewrite(storage.slice(),ProtocolVersion.MINECRAFT_26_3,ids[0],ids[1]);
-        assertArrayEquals(ByteBufUtil.getBytes(expected),ByteBufUtil.getBytes(output));
-        assertEquals(8,storage.readerIndex());assertEquals(123,storage.getLong(0));
-      } finally {body.release();expected.release();storage.release();if(output!=null)output.release();}
+        output =
+            BackendPassengerEntityRewriter.rewrite(
+                storage.slice(), ProtocolVersion.MINECRAFT_26_3, ids[0], ids[1]);
+        assertArrayEquals(ByteBufUtil.getBytes(expected), ByteBufUtil.getBytes(output));
+        assertEquals(8, storage.readerIndex());
+        assertEquals(123, storage.getLong(0));
+      } finally {
+        body.release();
+        expected.release();
+        storage.release();
+        if (output != null) {
+          output.release();
+        }
+      }
     }
   }
 
-  @Test void wrongProtocolAndUnchangedOrMissingIdentityCannotRewrite() {
-    ByteBuf input=packet(99,300);
+  @Test
+  void wrongProtocolAndUnchangedOrMissingIdentityCannotRewrite() {
+    ByteBuf input = packet(99, 300);
     try {
-      for(var version:new ProtocolVersion[]{ProtocolVersion.MINECRAFT_1_21_11,ProtocolVersion.MINECRAFT_26_1,ProtocolVersion.MINECRAFT_26_2})
-        assertNull(BackendPassengerEntityRewriter.rewrite(input,version,300,Integer.MAX_VALUE));
-      assertNull(BackendPassengerEntityRewriter.rewrite(input,ProtocolVersion.MINECRAFT_26_3,300,300));
-      assertNull(BackendPassengerEntityRewriter.rewrite(input,ProtocolVersion.MINECRAFT_26_3,null,Integer.MAX_VALUE));
-      assertNull(BackendPassengerEntityRewriter.rewrite(input,ProtocolVersion.MINECRAFT_26_3,300,null));
-    } finally {input.release();}
+      for (var version :
+          new ProtocolVersion[] {
+            ProtocolVersion.MINECRAFT_1_21_11,
+            ProtocolVersion.MINECRAFT_26_1,
+            ProtocolVersion.MINECRAFT_26_2
+          }) {
+        assertNull(BackendPassengerEntityRewriter.rewrite(input, version, 300, Integer.MAX_VALUE));
+      }
+      assertNull(
+          BackendPassengerEntityRewriter.rewrite(input, ProtocolVersion.MINECRAFT_26_3, 300, 300));
+      assertNull(
+          BackendPassengerEntityRewriter.rewrite(
+              input, ProtocolVersion.MINECRAFT_26_3, null, Integer.MAX_VALUE));
+      assertNull(
+          BackendPassengerEntityRewriter.rewrite(input, ProtocolVersion.MINECRAFT_26_3, 300, null));
+    } finally {
+      input.release();
+    }
   }
 
-  @Test void malformedCountsAndTruncatedReferencesFailBeforeAllocatingReplacement() {
-    for(int count:new int[]{-1,3,Integer.MAX_VALUE}) {
-      ByteBuf input=Unpooled.buffer();ProtocolUtils.writeVarInt(input,0x6D);ProtocolUtils.writeVarInt(input,99);
-      ProtocolUtils.writeVarInt(input,count);ProtocolUtils.writeVarInt(input,300);
+  @Test
+  void malformedCountsAndTruncatedReferencesFailBeforeAllocatingReplacement() {
+    for (int count : new int[] {-1, 3, Integer.MAX_VALUE}) {
+      ByteBuf input = Unpooled.buffer();
+      ProtocolUtils.writeVarInt(input, 0x6D);
+      ProtocolUtils.writeVarInt(input, 99);
+      ProtocolUtils.writeVarInt(input, count);
+      ProtocolUtils.writeVarInt(input, 300);
       try {
-        byte[] original=ByteBufUtil.getBytes(input);
-        assertThrows(IllegalArgumentException.class,()->BackendPassengerEntityRewriter.rewrite(input,ProtocolVersion.MINECRAFT_26_3,300,Integer.MAX_VALUE));
-        assertArrayEquals(original,ByteBufUtil.getBytes(input));assertEquals(1,input.refCnt());
-      } finally {input.release();}
+        byte[] original = ByteBufUtil.getBytes(input);
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                BackendPassengerEntityRewriter.rewrite(
+                    input, ProtocolVersion.MINECRAFT_26_3, 300, Integer.MAX_VALUE));
+        assertArrayEquals(original, ByteBufUtil.getBytes(input));
+        assertEquals(1, input.refCnt());
+      } finally {
+        input.release();
+      }
     }
-    ByteBuf input=packet(99,300).writeByte(1);
-    try {assertThrows(IllegalArgumentException.class,()->BackendPassengerEntityRewriter.rewrite(input,ProtocolVersion.MINECRAFT_26_3,300,Integer.MAX_VALUE));}
-    finally {input.release();}
-    ByteBuf truncated=packet(99,300);truncated.writerIndex(truncated.writerIndex()-1);
+    ByteBuf input = packet(99, 300).writeByte(1);
     try {
-      assertThrows(RuntimeException.class,()->BackendPassengerEntityRewriter.rewrite(truncated,ProtocolVersion.MINECRAFT_26_3,300,Integer.MAX_VALUE));
-      assertEquals(1,truncated.refCnt());
-    } finally {truncated.release();}
+      assertThrows(
+          IllegalArgumentException.class,
+          () ->
+              BackendPassengerEntityRewriter.rewrite(
+                  input, ProtocolVersion.MINECRAFT_26_3, 300, Integer.MAX_VALUE));
+    } finally {
+      input.release();
+    }
+    ByteBuf truncated = packet(99, 300);
+    truncated.writerIndex(truncated.writerIndex() - 1);
+    try {
+      assertThrows(
+          RuntimeException.class,
+          () ->
+              BackendPassengerEntityRewriter.rewrite(
+                  truncated, ProtocolVersion.MINECRAFT_26_3, 300, Integer.MAX_VALUE));
+      assertEquals(1, truncated.refCnt());
+    } finally {
+      truncated.release();
+    }
   }
 }

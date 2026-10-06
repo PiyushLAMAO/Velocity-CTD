@@ -51,17 +51,19 @@ class ClientConfigSessionHandlerTest {
   private VelocityServer server;
   private ConnectedPlayer player;
   private ClientConfigSessionHandler handler;
+  private io.netty.channel.embedded.EmbeddedChannel backendChannel;
 
   @BeforeEach
   void setUp() {
     server = mock(VelocityServer.class);
     player = mock(ConnectedPlayer.class);
     handler = new ClientConfigSessionHandler(server, player);
+    backendChannel = new io.netty.channel.embedded.EmbeddedChannel();
   }
 
   @AfterEach
   void tearDown() {
-    // nothing to clean up; each test manages its own ByteBufs
+    backendChannel.finishAndReleaseAll();
   }
 
   private ServerboundCustomClickActionPacket makePacket() {
@@ -168,6 +170,8 @@ class ClientConfigSessionHandlerTest {
     MinecraftConnection backend = mock(MinecraftConnection.class);
     when(player.getConnectionInFlightOrConnectedServer()).thenReturn(inFlight);
     when(inFlight.getConnection()).thenReturn(backend);
+    when(backend.getState()).thenReturn(StateRegistry.CONFIG);
+    when(backend.eventLoop()).thenReturn(backendChannel.eventLoop());
     return backend;
   }
 
@@ -184,6 +188,7 @@ class ClientConfigSessionHandlerTest {
     verify(player, times(1)).disconnect(any());
 
     configurationEvent.complete(null);
+    backendChannel.runPendingTasks();
     verify(backend, times(1)).write(any());
     verify(backend).write(first);
   }
@@ -193,7 +198,9 @@ class ClientConfigSessionHandlerTest {
     final MinecraftConnection backend = knownPacksBackend(CompletableFuture.completedFuture(null));
 
     assertTrue(handler.handle(new KnownPacksPacket()));
+    backendChannel.runPendingTasks();
     assertTrue(handler.handle(new KnownPacksPacket()));
+    backendChannel.runPendingTasks();
 
     verify(player, never()).disconnect(any());
     verify(backend, times(2)).write(any());

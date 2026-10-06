@@ -33,6 +33,7 @@ import com.velocitypowered.proxy.connection.client.ConnectedPlayer;
 import com.velocitypowered.proxy.connection.util.ConnectionMessages;
 import com.velocitypowered.proxy.connection.util.ConnectionRequestResults;
 import com.velocitypowered.proxy.connection.util.ConnectionRequestResults.Impl;
+import com.velocitypowered.proxy.network.Connections;
 import com.velocitypowered.proxy.protocol.MinecraftPacket;
 import com.velocitypowered.proxy.protocol.StateRegistry;
 import com.velocitypowered.proxy.protocol.netty.ProxyJoinPacketQueue;
@@ -42,14 +43,11 @@ import com.velocitypowered.proxy.protocol.packet.KeepAlivePacket;
 import com.velocitypowered.proxy.protocol.packet.PluginMessagePacket;
 import com.velocitypowered.proxy.server.VelocityRegisteredServer;
 import io.netty.buffer.ByteBuf;
-import com.velocitypowered.proxy.network.Connections;
 import java.util.concurrent.CompletableFuture;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-/**
- * A special session handler that catches "last minute" disconnects.
- */
+/** A special session handler that catches "last minute" disconnects. */
 public class TransitionSessionHandler implements MinecraftSessionHandler {
 
   private static final Logger LOGGER = LogManager.getLogger(TransitionSessionHandler.class);
@@ -69,18 +67,19 @@ public class TransitionSessionHandler implements MinecraftSessionHandler {
   /**
    * Creates the new transition handler.
    *
-   * @param server       the Velocity server instance
-   * @param serverConn   the server connection
+   * @param server the Velocity server instance
+   * @param serverConn the server connection
    * @param resultFuture the result future
    */
-  public TransitionSessionHandler(VelocityServer server,
-                                  VelocityServerConnection serverConn,
-                                  CompletableFuture<Impl> resultFuture) {
+  public TransitionSessionHandler(
+      VelocityServer server,
+      VelocityServerConnection serverConn,
+      CompletableFuture<Impl> resultFuture) {
     this.server = server;
     this.serverConn = serverConn;
     this.resultFuture = resultFuture;
-    this.bungeecordMessageResponder = new BungeeCordMessageResponder(server,
-        serverConn.getPlayer());
+    this.bungeecordMessageResponder =
+        new BungeeCordMessageResponder(server, serverConn.getPlayer());
   }
 
   @Override
@@ -126,82 +125,98 @@ public class TransitionSessionHandler implements MinecraftSessionHandler {
 
     // The goods are in hand! We got JoinGame. Let's transition completely to the new state.
     smc.setAutoReading(false);
-    server.getEventManager()
+    server
+        .getEventManager()
         .fire(new ServerConnectedEvent(player, serverConn.getServer(), previousServer))
-        .thenRunAsync(() -> {
-          // Make sure we can still transition (player might have disconnected here).
-          if (!serverConn.isActive()) {
-            // Connection is obsolete.
-            releaseDeferredPackets();
-            serverConn.disconnect();
-            return;
-          }
+        .thenRunAsync(
+            () -> {
+              // Make sure we can still transition (player might have disconnected here).
+              if (!serverConn.isActive()) {
+                // Connection is obsolete.
+                releaseDeferredPackets();
+                serverConn.disconnect();
+                return;
+              }
 
-          // Change the client to use the ClientPlaySessionHandler if required.
-          ClientPlaySessionHandler playHandler;
-          if (player.getConnection()
-              .getActiveSessionHandler() instanceof ClientPlaySessionHandler sessionHandler) {
-            playHandler = sessionHandler;
-          } else {
-            playHandler = new ClientPlaySessionHandler(server, player);
-            player.getConnection().setActiveSessionHandler(StateRegistry.PLAY, playHandler);
-          }
+              // Change the client to use the ClientPlaySessionHandler if required.
+              ClientPlaySessionHandler playHandler;
+              if (player.getConnection().getActiveSessionHandler()
+                  instanceof ClientPlaySessionHandler sessionHandler) {
+                playHandler = sessionHandler;
+              } else {
+                playHandler = new ClientPlaySessionHandler(server, player);
+                player.getConnection().setActiveSessionHandler(StateRegistry.PLAY, playHandler);
+              }
 
-          // Publish both sides before JoinGame flushes. The client can immediately answer
-          // position/arrival packets or issue a command on the other Netty event loop.
-          if (serverConn.getProxyAdmission() != null
-              && smc.getChannel().pipeline().context(ProxyJoinPacketQueue.NAME) == null) {
-            smc.getChannel().pipeline().addBefore(Connections.HANDLER,
-                ProxyJoinPacketQueue.NAME, new ProxyJoinPacketQueue(smc.getProtocolVersion()));
-          }
-          final BackendPlaySessionHandler backendHandler =
-              new BackendPlaySessionHandler(server, serverConn);
-          smc.setActiveSessionHandler(StateRegistry.PLAY, backendHandler);
-          player.setConnectedServer(serverConn);
-          // World packets may be answered on the other event loop as soon as they flush.
-          // Publish the forwarding phase first, or those early raw responses are dropped.
-          serverConn.completeJoin();
-          playHandler.handleBackendJoinGame(packet, serverConn);
+              // Publish both sides before JoinGame flushes. The client can immediately answer
+              // position/arrival packets or issue a command on the other Netty event loop.
+              if (serverConn.getProxyAdmission() != null
+                  && smc.getChannel().pipeline().context(ProxyJoinPacketQueue.NAME) == null) {
+                smc.getChannel()
+                    .pipeline()
+                    .addBefore(
+                        Connections.HANDLER,
+                        ProxyJoinPacketQueue.NAME,
+                        new ProxyJoinPacketQueue(smc.getProtocolVersion()));
+              }
+              final BackendPlaySessionHandler backendHandler =
+                  new BackendPlaySessionHandler(server, serverConn);
+              smc.setActiveSessionHandler(StateRegistry.PLAY, backendHandler);
+              player.setConnectedServer(serverConn);
+              // World packets may be answered on the other event loop as soon as they flush.
+              // Publish the forwarding phase first, or those early raw responses are dropped.
+              serverConn.completeJoin();
+              playHandler.handleBackendJoinGame(packet, serverConn);
 
-          // Replay through PLAY dispatch, including entity translation and world tracking.
-          joinGameProcessing = false;
-          deferredPackets.replay(backendHandler);
+              // Replay through PLAY dispatch, including entity translation and world tracking.
+              joinGameProcessing = false;
+              deferredPackets.replay(backendHandler);
 
-          // Clean up disabling auto-read while the connected event was being processed.
-          // Do this after setting the connection, so no incoming packets are processed before
-          // the API knows which server the player is connected to.
-          smc.setAutoReading(true);
+              // Clean up disabling auto-read while the connected event was being processed.
+              // Do this after setting the connection, so no incoming packets are processed before
+              // the API knows which server the player is connected to.
+              smc.setAutoReading(true);
 
-          // Send client settings. In 1.20.2+ this is done in the config state.
-          if (smc.getProtocolVersion().lessThan(ProtocolVersion.MINECRAFT_1_20_2)
-              && player.getClientSettingsPacket() != null) {
-            serverConn.ensureConnected().write(player.getClientSettingsPacket());
-          }
+              // Send client settings. In 1.20.2+ this is done in the config state.
+              if (smc.getProtocolVersion().lessThan(ProtocolVersion.MINECRAFT_1_20_2)
+                  && player.getClientSettingsPacket() != null) {
+                serverConn.ensureConnected().write(player.getClientSettingsPacket());
+              }
 
-          server.getClusterPlayerService().onPlayerSwitchServer(
-              player,
-              previousServer != null ? previousServer.getServerInfo().getName() : null,
-              serverConn.getServerInfo().getName());
+              server
+                  .getClusterPlayerService()
+                  .onPlayerSwitchServer(
+                      player,
+                      previousServer != null ? previousServer.getServerInfo().getName() : null,
+                      serverConn.getServerInfo().getName());
 
-          if (this.server.isQueueEnabled()) {
-            VelocityQueue<?> queue = this.server.getQueueManager().getQueue(serverConn.getServer()
-                    .getServerInfo().getName());
-            queue.dequeue(player.getUniqueId());
-          }
+              if (this.server.isQueueEnabled()) {
+                VelocityQueue<?> queue =
+                    this.server
+                        .getQueueManager()
+                        .getQueue(serverConn.getServer().getServerInfo().getName());
+                queue.dequeue(player.getUniqueId());
+              }
 
-          // We're done! :)
-          server.getEventManager().fireAndForget(new ServerPostConnectEvent(player,
-              previousServer));
-          resultFuture.complete(ConnectionRequestResults.successful(serverConn.getServer()));
-        }, smc.eventLoop()).exceptionally(exc -> {
-          LOGGER.error("Unable to switch to new server {} for {}",
-              serverConn.getServerInfo().getName(),
-              player.getUsername(), exc);
-          releaseDeferredPackets();
-          player.disconnect(ConnectionMessages.INTERNAL_SERVER_CONNECTION_ERROR);
-          resultFuture.completeExceptionally(exc);
-          return null;
-        });
+              // We're done! :)
+              server
+                  .getEventManager()
+                  .fireAndForget(new ServerPostConnectEvent(player, previousServer));
+              resultFuture.complete(ConnectionRequestResults.successful(serverConn.getServer()));
+            },
+            smc.eventLoop())
+        .exceptionally(
+            exc -> {
+              LOGGER.error(
+                  "Unable to switch to new server {} for {}",
+                  serverConn.getServerInfo().getName(),
+                  player.getUsername(),
+                  exc);
+              releaseDeferredPackets();
+              player.disconnect(ConnectionMessages.INTERNAL_SERVER_CONNECTION_ERROR);
+              resultFuture.completeExceptionally(exc);
+              return null;
+            });
 
     return true;
   }
@@ -215,8 +230,8 @@ public class TransitionSessionHandler implements MinecraftSessionHandler {
     // the client.
     if (connection.getType() == ConnectionTypes.LEGACY_FORGE
         && !serverConn.getPhase().consideredComplete()) {
-      resultFuture.complete(ConnectionRequestResults.forUnsafeDisconnect(packet,
-          serverConn.getServer()));
+      resultFuture.complete(
+          ConnectionRequestResults.forUnsafeDisconnect(packet, serverConn.getServer()));
     } else {
       resultFuture.complete(ConnectionRequestResults.forDisconnect(packet, serverConn.getServer()));
     }
@@ -246,8 +261,9 @@ public class TransitionSessionHandler implements MinecraftSessionHandler {
           existingConnection.setConnectionPhase(IN_TRANSITION);
 
           // Tell the player that we're leaving and we just aren't coming back.
-          existingConnection.getPhase().onDepartForNewServer(existingConnection,
-              serverConn.getPlayer());
+          existingConnection
+              .getPhase()
+              .onDepartForNewServer(existingConnection, serverConn.getPlayer());
         }
       }
       return true;
@@ -277,7 +293,8 @@ public class TransitionSessionHandler implements MinecraftSessionHandler {
   @Override
   public void disconnected() {
     releaseDeferredPackets();
-    resultFuture.complete(ConnectionRequestResults.forDisconnect(
-        ConnectionMessages.INTERNAL_SERVER_CONNECTION_ERROR, serverConn.getServer()));
+    resultFuture.complete(
+        ConnectionRequestResults.forDisconnect(
+            ConnectionMessages.INTERNAL_SERVER_CONNECTION_ERROR, serverConn.getServer()));
   }
 }

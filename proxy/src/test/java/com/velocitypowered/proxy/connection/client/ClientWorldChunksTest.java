@@ -17,7 +17,9 @@
 
 package com.velocitypowered.proxy.connection.client;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
 import com.velocitypowered.api.network.ProtocolVersion;
 import com.velocitypowered.proxy.protocol.ProtocolUtils;
 import com.velocitypowered.proxy.protocol.packet.ForgetChunkPacket;
@@ -29,9 +31,12 @@ import org.junit.jupiter.api.Test;
 class ClientWorldChunksTest {
   @Test
   void unloadsOldWorldOnceAndPreservesRawReaderIndexForAllSupportedVersions() {
-    ProtocolVersion[] versions = {ProtocolVersion.MINECRAFT_1_21_11,
-        ProtocolVersion.MINECRAFT_26_1, ProtocolVersion.MINECRAFT_26_2,
-        ProtocolVersion.MINECRAFT_26_3};
+    ProtocolVersion[] versions = {
+      ProtocolVersion.MINECRAFT_1_21_11,
+      ProtocolVersion.MINECRAFT_26_1,
+      ProtocolVersion.MINECRAFT_26_2,
+      ProtocolVersion.MINECRAFT_26_3
+    };
     int[] ids = {0x2C, 0x2D, 0x2D, 0x2E};
     for (int i = 0; i < versions.length; i++) {
       var chunks = new ClientWorldChunks();
@@ -51,7 +56,8 @@ class ClientWorldChunksTest {
       forgotten.getFirst().encode(wire, ProtocolUtils.Direction.CLIENTBOUND, versions[i]);
       assertEquals(8, wire.readInt());
       assertEquals(-3, wire.readInt());
-      wire.release(); buf.release();
+      wire.release();
+      buf.release();
     }
   }
 
@@ -59,14 +65,16 @@ class ClientWorldChunksTest {
   void normalForgetAndConfigurationResetDiscardOldCoordinates() {
     var chunks = new ClientWorldChunks();
     var buf = Unpooled.buffer();
-    ProtocolUtils.writeVarInt(buf, 0x2E); buf.writeInt(4).writeInt(-9);
+    ProtocolUtils.writeVarInt(buf, 0x2E);
+    buf.writeInt(4).writeInt(-9);
     chunks.observe(buf, ProtocolVersion.MINECRAFT_26_3);
     chunks.forget(4L | (-9L << 32));
     List<ForgetChunkPacket> forgotten = new ArrayList<>();
     chunks.unload(forgotten::add);
     assertTrue(forgotten.isEmpty());
     chunks.observe(buf, ProtocolVersion.MINECRAFT_26_3);
-    chunks.clear(); chunks.unload(forgotten::add);
+    chunks.clear();
+    chunks.unload(forgotten::add);
     assertTrue(forgotten.isEmpty());
     buf.release();
   }

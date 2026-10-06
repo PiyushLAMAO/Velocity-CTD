@@ -70,22 +70,28 @@ class ConfigSessionHandlerTest {
 
   @ParameterizedTest
   @CsvSource({"true, false", "true, true", "false, false", "false, true"})
-  void playPacketsAnsweringTheAcknowledgementAreHandledInPlay(boolean reconfiguring,
-      boolean buffer) throws Exception {
+  void playPacketsAnsweringTheAcknowledgementAreHandledInPlay(boolean reconfiguring, boolean buffer)
+      throws Exception {
     Backend backend = new Backend(reconfiguring);
     AtomicInteger acknowledgements = new AtomicInteger();
-    backend.channel.pipeline().addBefore(Connections.MINECRAFT_ENCODER, "answers-synchronously",
-        new ChannelOutboundHandlerAdapter() {
-          @Override
-          public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) {
-            ByteBuf acknowledgement = (ByteBuf) msg;
-            assertEquals(configPacketId(FinishedUpdatePacket.INSTANCE),
-                ProtocolUtils.readVarInt(acknowledgement.duplicate()));
-            acknowledgements.incrementAndGet();
-            backend.channel.writeInbound(encodedJoinGame());
-            ctx.write(msg, promise);
-          }
-        });
+    backend
+        .channel
+        .pipeline()
+        .addBefore(
+            Connections.MINECRAFT_ENCODER,
+            "answers-synchronously",
+            new ChannelOutboundHandlerAdapter() {
+              @Override
+              public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) {
+                ByteBuf acknowledgement = (ByteBuf) msg;
+                assertEquals(
+                    configPacketId(FinishedUpdatePacket.INSTANCE),
+                    ProtocolUtils.readVarInt(acknowledgement.duplicate()));
+                acknowledgements.incrementAndGet();
+                backend.channel.writeInbound(encodedJoinGame());
+                ctx.write(msg, promise);
+              }
+            });
 
     try {
       backend.advance(buffer);
@@ -128,11 +134,13 @@ class ConfigSessionHandlerTest {
       ByteBuf acknowledgement = Unpooled.buffer();
       ProtocolUtils.writeVarInt(acknowledgement, configPacketId(FinishedUpdatePacket.INSTANCE));
       ByteBuf chatAcknowledgement = Unpooled.buffer();
-      ProtocolUtils.writeVarInt(chatAcknowledgement,
+      ProtocolUtils.writeVarInt(
+          chatAcknowledgement,
           StateRegistry.PLAY.getProtocolRegistry(OUTBOUND, VERSION).getPacketId(queued));
       queued.encode(chatAcknowledgement, OUTBOUND, VERSION);
-      assertEquals(List.of(ByteBufUtil.hexDump(acknowledgement),
-          ByteBufUtil.hexDump(chatAcknowledgement)), written);
+      assertEquals(
+          List.of(ByteBufUtil.hexDump(acknowledgement), ByteBufUtil.hexDump(chatAcknowledgement)),
+          written);
       acknowledgement.release();
       chatAcknowledgement.release();
     } finally {
@@ -147,8 +155,12 @@ class ConfigSessionHandlerTest {
     when(player.getConnection()).thenReturn(playerConnection);
     VelocityServerConnection serverConn = mock(VelocityServerConnection.class);
     when(serverConn.getPlayer()).thenReturn(player);
-    ConfigSessionHandler handler = new ConfigSessionHandler(mock(VelocityServer.class), serverConn,
-        new CompletableFuture<>());
+    when(serverConn.getServerInfo())
+        .thenReturn(
+            new com.velocitypowered.api.proxy.server.ServerInfo(
+                "fixture", new java.net.InetSocketAddress("127.0.0.1", 25000)));
+    ConfigSessionHandler handler =
+        new ConfigSessionHandler(mock(VelocityServer.class), serverConn, new CompletableFuture<>());
     ByteBuf resetChat = Unpooled.buffer().writeByte(0x06);
 
     handler.handleUnknown(resetChat);
@@ -171,24 +183,22 @@ class ConfigSessionHandlerTest {
     } catch (ReflectiveOperationException e) {
       throw new AssertionError(e);
     }
-    joinGame.setDimensionInfo(new DimensionInfo("minecraft:overworld", "minecraft:overworld",
-        false, false, VERSION));
+    joinGame.setDimensionInfo(
+        new DimensionInfo("minecraft:overworld", "minecraft:overworld", false, false, VERSION));
     ByteBuf frame = Unpooled.buffer();
-    ProtocolUtils.writeVarInt(frame,
-        StateRegistry.PLAY.getProtocolRegistry(INBOUND, VERSION).getPacketId(joinGame));
+    ProtocolUtils.writeVarInt(
+        frame, StateRegistry.PLAY.getProtocolRegistry(INBOUND, VERSION).getPacketId(joinGame));
     joinGame.encode(frame, INBOUND, VERSION);
     return frame;
   }
 
-  private record Handled(Object message, MinecraftSessionHandler handler) {
-  }
+  private record Handled(Object message, MinecraftSessionHandler handler) {}
 
   private static final class Backend {
 
     private final EmbeddedChannel channel = new EmbeddedChannel();
     private final MinecraftConnection connection;
-    private final MinecraftSessionHandler playHandler = new MinecraftSessionHandler() {
-    };
+    private final MinecraftSessionHandler playHandler = new MinecraftSessionHandler() {};
     private final List<Handled> handled = new ArrayList<>();
     private final ConfigSessionHandler configHandler;
 
@@ -200,6 +210,10 @@ class ConfigSessionHandlerTest {
       when(player.getPlayerListFooter()).thenReturn(Component.empty());
       VelocityServerConnection serverConn = mock(VelocityServerConnection.class);
       when(serverConn.getPlayer()).thenReturn(player);
+      when(serverConn.getServerInfo())
+          .thenReturn(
+              new com.velocitypowered.api.proxy.server.ServerInfo(
+                  "fixture", new java.net.InetSocketAddress("127.0.0.1", 25000)));
       if (reconfiguring) {
         when(player.getConnectedServer()).thenReturn(serverConn);
       }
@@ -208,12 +222,16 @@ class ConfigSessionHandlerTest {
       channel.pipeline().addLast(Connections.MINECRAFT_ENCODER, new MinecraftEncoder(OUTBOUND));
       VelocityServer server = mock(VelocityServer.class);
       connection = new MinecraftConnection(channel, server, null);
-      channel.pipeline().addLast("records-handling", new ChannelInboundHandlerAdapter() {
-        @Override
-        public void channelRead(ChannelHandlerContext ctx, Object msg) {
-          handled.add(new Handled(msg, connection.getActiveSessionHandler()));
-        }
-      });
+      channel
+          .pipeline()
+          .addLast(
+              "records-handling",
+              new ChannelInboundHandlerAdapter() {
+                @Override
+                public void channelRead(ChannelHandlerContext ctx, Object msg) {
+                  handled.add(new Handled(msg, connection.getActiveSessionHandler()));
+                }
+              });
       channel.pipeline().addLast(Connections.HANDLER, connection);
       connection.setProtocolVersion(VERSION);
       when(serverConn.getConnection()).thenReturn(connection);
@@ -225,8 +243,8 @@ class ConfigSessionHandlerTest {
     }
 
     private void advance(boolean buffer) throws ReflectiveOperationException {
-      Method advance = ConfigSessionHandler.class.getDeclaredMethod("advanceBackendToPlay",
-          boolean.class);
+      Method advance =
+          ConfigSessionHandler.class.getDeclaredMethod("advanceBackendToPlay", boolean.class);
       advance.setAccessible(true);
       advance.invoke(configHandler, buffer);
     }

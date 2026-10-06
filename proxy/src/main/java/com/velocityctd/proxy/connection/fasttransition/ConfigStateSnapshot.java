@@ -66,14 +66,16 @@ public final class ConfigStateSnapshot {
    * written there as {@code <dumpDir>/<label>/NN-<tag>-<name>.bin}, for byte-level diffing of what
    * each backend sends during configuration. Debug-only; unset in normal operation.
    */
-  private static final @Nullable String DUMP_DIR = System.getProperty("velocityctd.fasttransition.dumpDir");
+  private static final @Nullable String DUMP_DIR =
+      System.getProperty("velocityctd.fasttransition.dumpDir");
 
   private final byte[] fingerprint;
   private final byte[] playTagsFingerprint;
   private final List<String> entries;
   private final boolean complete;
 
-  private ConfigStateSnapshot(byte[] fingerprint, byte[] playTagsFingerprint, List<String> entries, boolean complete) {
+  private ConfigStateSnapshot(
+      byte[] fingerprint, byte[] playTagsFingerprint, List<String> entries, boolean complete) {
     this.fingerprint = fingerprint;
     this.playTagsFingerprint = playTagsFingerprint;
     this.entries = entries;
@@ -81,15 +83,20 @@ public final class ConfigStateSnapshot {
   }
 
   public boolean matches(@Nullable ConfigStateSnapshot other) {
-    return other != null && complete && other.complete
+    return other != null
+        && complete
+        && other.complete
         && Arrays.equals(this.fingerprint, other.fingerprint);
   }
 
   /** Tags can change in PLAY only after all registries, features and known packs match exactly. */
   public boolean matchesWithPlayTagUpdate(@Nullable ConfigStateSnapshot other) {
-    return other != null && complete && other.complete
+    return other != null
+        && complete
+        && other.complete
         && Arrays.equals(playTagsFingerprint, other.playTagsFingerprint);
   }
+
   public List<String> entries() {
     return entries;
   }
@@ -103,8 +110,8 @@ public final class ConfigStateSnapshot {
   }
 
   /**
-   * Creates a builder that, when {@code -Dvelocityctd.fasttransition.dumpDir=...} is set, also writes
-   * each captured payload to disk under the given label (e.g. the backend server name).
+   * Creates a builder that, when {@code -Dvelocityctd.fasttransition.dumpDir=...} is set, also
+   * writes each captured payload to disk under the given label (e.g. the backend server name).
    */
   public static Builder builder(@Nullable String dumpLabel) {
     return new Builder(dumpLabel);
@@ -123,15 +130,14 @@ public final class ConfigStateSnapshot {
       this.dumpLabel = dumpLabel;
     }
 
-    /**
-     * Doesn't consume the buffer.
-     */
+    /** Doesn't consume the buffer. */
     public void addRegistrySync(ByteBuf content, ProtocolVersion version) {
       // Copies the readable bytes without advancing the reader index.
       byte[] raw = ByteBufUtil.getBytes(content);
       String name = peekRegistryName(content);
       // Fingerprint the canonical form (NBT compound keys are unordered, so different server
-      // implementations serialize them in different orders while being fully compatible); dump the raw
+      // implementations serialize them in different orders while being fully compatible); dump the
+      // raw
       // bytes so the on-disk capture stays a faithful copy of the wire.
       registryData.put(name, canonicalize(content, version, raw));
       dumpPayload((byte) 'R', name, raw);
@@ -140,9 +146,9 @@ public final class ConfigStateSnapshot {
     /**
      * Returns a canonicalized copy of a registry-sync payload in which every entry's NBT has been
      * re-serialized with compound keys sorted recursively. NBT compounds are unordered maps, so two
-     * server implementations can emit the same registry with different key orderings while being fully
-     * compatible; sorting removes that noise so equal registries fingerprint equal. Falls back to the
-     * raw bytes for pre-1.20.5 formats or on any parse error.
+     * server implementations can emit the same registry with different key orderings while being
+     * fully compatible; sorting removes that noise so equal registries fingerprint equal. Falls
+     * back to the raw bytes for pre-1.20.5 formats or on any parse error.
      */
     private static byte[] canonicalize(ByteBuf content, ProtocolVersion version, byte[] raw) {
       if (version.lessThan(ProtocolVersion.MINECRAFT_1_20_5)) {
@@ -175,9 +181,10 @@ public final class ConfigStateSnapshot {
     }
 
     /**
-     * Writes {@code tag} to {@code out} in a deterministic form: compound keys are emitted in sorted
-     * order and every value is written verbatim, so semantically equal NBT always produces identical
-     * bytes regardless of the source's key ordering. This is a fingerprint form, not valid wire NBT.
+     * Writes {@code tag} to {@code out} in a deterministic form: compound keys are emitted in
+     * sorted order and every value is written verbatim, so semantically equal NBT always produces
+     * identical bytes regardless of the source's key ordering. This is a fingerprint form, not
+     * valid wire NBT.
      */
     private static void canonicalizeTag(BinaryTag tag, ByteBuf out) {
       BinaryTagType<?> type = tag.type();
@@ -317,8 +324,14 @@ public final class ConfigStateSnapshot {
     private static String describe(byte tag, String name, byte[] data, boolean ignored) {
       CRC32 crc = new CRC32();
       crc.update(data);
-      return (char) tag + ":" + name + " len=" + data.length
-          + " crc=" + Long.toHexString(crc.getValue()) + (ignored ? "  [IGNORED]" : "");
+      return (char) tag
+          + ":"
+          + name
+          + " len="
+          + data.length
+          + " crc="
+          + Long.toHexString(crc.getValue())
+          + (ignored ? "  [IGNORED]" : "");
     }
 
     private static String peekRegistryName(ByteBuf content) {
@@ -362,9 +375,13 @@ public final class ConfigStateSnapshot {
         hashInto(digest, (byte) 'K', knownPacksData);
         hashInto(playTagsDigest, (byte) 'K', knownPacksData);
       }
-      boolean complete = !registryData.isEmpty() && tagsData != null
-          && featuresData != null && knownPacksData != null;
-      return new ConfigStateSnapshot(digest.digest(), playTagsDigest.digest(), List.copyOf(entries), complete);
+      boolean complete =
+          !registryData.isEmpty()
+              && tagsData != null
+              && featuresData != null
+              && knownPacksData != null;
+      return new ConfigStateSnapshot(
+          digest.digest(), playTagsDigest.digest(), List.copyOf(entries), complete);
     }
   }
 }

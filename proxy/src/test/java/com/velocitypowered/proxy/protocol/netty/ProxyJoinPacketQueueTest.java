@@ -17,7 +17,13 @@
 
 package com.velocitypowered.proxy.protocol.netty;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
 import com.velocitypowered.api.network.ProtocolVersion;
 import com.velocitypowered.proxy.protocol.packet.KeepAlivePacket;
 import com.velocitypowered.proxy.protocol.packet.ServerboundPlayerLoadedPacket;
@@ -53,8 +59,10 @@ class ProxyJoinPacketQueueTest {
   @Test
   void closingBeforeArrivalFailsHeldWritesRatherThanSilentlyLosingCommands() {
     var channel = new EmbeddedChannel();
-    channel.pipeline().addLast(ProxyJoinPacketQueue.NAME,
-        new ProxyJoinPacketQueue(ProtocolVersion.MINECRAFT_1_21_11));
+    channel
+        .pipeline()
+        .addLast(
+            ProxyJoinPacketQueue.NAME, new ProxyJoinPacketQueue(ProtocolVersion.MINECRAFT_1_21_11));
     var promise = channel.newPromise();
     channel.write(ServerboundPlayerLoadedPacket.INSTANCE, promise);
     channel.close();
@@ -63,16 +71,20 @@ class ProxyJoinPacketQueueTest {
     assertNull(channel.readOutbound());
     channel.finishAndReleaseAll();
   }
+
   @Test
   void proxyPublicationReleasesArrivalButCommandsWaitForActualGameReply() {
-    for (var version : new ProtocolVersion[]{ProtocolVersion.MINECRAFT_1_21_11, ProtocolVersion.MINECRAFT_26_3}) {
+    for (var version :
+        new ProtocolVersion[] {ProtocolVersion.MINECRAFT_1_21_11, ProtocolVersion.MINECRAFT_26_3}) {
       var hold = new ProxyJoinPacketQueue(version);
       var channel = new EmbeddedChannel();
       channel.pipeline().addLast(ProxyJoinPacketQueue.NAME, hold);
-      var command = new com.velocitypowered.proxy.protocol.packet.chat.session.UnsignedPlayerCommandPacket();
+      var command =
+          new com.velocitypowered.proxy.protocol.packet.chat.session.UnsignedPlayerCommandPacket();
       var data = Unpooled.buffer();
       com.velocitypowered.proxy.protocol.ProtocolUtils.writeString(data, "settings");
-      command.decode(data, com.velocitypowered.proxy.protocol.ProtocolUtils.Direction.SERVERBOUND, version);
+      command.decode(
+          data, com.velocitypowered.proxy.protocol.ProtocolUtils.Direction.SERVERBOUND, version);
       data.release();
       var promise = channel.newPromise();
       channel.writeOutbound(ServerboundPlayerLoadedPacket.INSTANCE);
@@ -81,7 +93,9 @@ class ProxyJoinPacketQueueTest {
       assertNull(channel.readOutbound());
       hold.proxyReady(channel.pipeline().context(ProxyJoinPacketQueue.NAME));
       assertSame(ServerboundPlayerLoadedPacket.INSTANCE, channel.readOutbound());
-      var probe = (com.velocitypowered.proxy.protocol.packet.TabCompleteRequestPacket) channel.readOutbound();
+      var probe =
+          (com.velocitypowered.proxy.protocol.packet.TabCompleteRequestPacket)
+              channel.readOutbound();
       assertEquals(ProxyJoinPacketQueue.PROBE_TRANSACTION, probe.getTransactionId());
       assertEquals("/", probe.getCommand());
       assertFalse(promise.isDone());
@@ -100,7 +114,9 @@ class ProxyJoinPacketQueueTest {
     var channel = new EmbeddedChannel();
     channel.pipeline().addLast(ProxyJoinPacketQueue.NAME, hold);
     hold.proxyReady(channel.pipeline().context(ProxyJoinPacketQueue.NAME));
-    assertInstanceOf(com.velocitypowered.proxy.protocol.packet.TabCompleteRequestPacket.class, channel.readOutbound());
+    assertInstanceOf(
+        com.velocitypowered.proxy.protocol.packet.TabCompleteRequestPacket.class,
+        channel.readOutbound());
     channel.writeOutbound(ServerboundPlayerLoadedPacket.INSTANCE);
     assertSame(ServerboundPlayerLoadedPacket.INSTANCE, channel.readOutbound());
     var command = new com.velocitypowered.proxy.protocol.packet.TabCompleteRequestPacket();
@@ -118,5 +134,4 @@ class ProxyJoinPacketQueueTest {
     assertNull(channel.readOutbound());
     channel.finishAndReleaseAll();
   }
-
 }

@@ -30,7 +30,6 @@ import com.velocitypowered.proxy.connection.client.ConnectedPlayer;
 import com.velocitypowered.proxy.protocol.MinecraftPacket;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
-import java.lang.reflect.Method;
 import java.util.concurrent.CompletableFuture;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentMatchers;
@@ -78,13 +77,28 @@ class TransitionSessionHandlerTest {
     when(player.getConnection()).thenReturn(playerConnection);
     VelocityServerConnection serverConn = mock(VelocityServerConnection.class);
     when(serverConn.getPlayer()).thenReturn(player);
-    return new TransitionSessionHandler(mock(VelocityServer.class), serverConn,
-        new CompletableFuture<>());
+    return new TransitionSessionHandler(
+        mock(VelocityServer.class), serverConn, new CompletableFuture<>());
   }
 
   private void completeSwitch() throws Exception {
-    Method flush = TransitionSessionHandler.class.getDeclaredMethod("flushDeferredPackets");
-    flush.setAccessible(true);
-    flush.invoke(handler);
+    java.lang.reflect.Field field =
+        TransitionSessionHandler.class.getDeclaredField("deferredPackets");
+    field.setAccessible(true);
+    DeferredPlayPackets held = (DeferredPlayPackets) field.get(handler);
+    held.replay(
+        new com.velocitypowered.proxy.connection.MinecraftSessionHandler() {
+          public void handleGeneric(MinecraftPacket packet) {
+            playerConnection.delayedWrite(packet);
+          }
+
+          public void handleUnknown(ByteBuf packet) {
+            playerConnection.delayedWrite(packet.retain());
+          }
+
+          public void readCompleted() {
+            playerConnection.flush();
+          }
+        });
   }
 }

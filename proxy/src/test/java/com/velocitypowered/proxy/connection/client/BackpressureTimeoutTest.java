@@ -403,7 +403,10 @@ class BackpressureTimeoutTest {
         "com.velocitypowered.proxy.connection.backend.ConfigSessionHandler")
             .getDeclaredConstructors()[0];
     ctor.setAccessible(true);
-    Object handler = ctor.newInstance(server, backendConnection.getAssociation(),
+    VelocityServerConnection association = (VelocityServerConnection) backendConnection.getAssociation();
+    when(association.getServerInfo()).thenReturn(new com.velocitypowered.api.proxy.server.ServerInfo(
+        "fixture", new java.net.InetSocketAddress("127.0.0.1", 25000)));
+    Object handler = ctor.newInstance(server, association,
         new CompletableFuture<>());
     Field advanced = handler.getClass().getDeclaredField("backendAdvancedToPlay");
     advanced.setAccessible(true);

@@ -17,13 +17,18 @@
 
 package com.velocitypowered.proxy.connection.backend;
 
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
 import com.velocitypowered.api.network.ProtocolVersion;
 import com.velocitypowered.proxy.VelocityServer;
 import com.velocitypowered.proxy.connection.MinecraftConnection;
-import com.velocitypowered.proxy.connection.client.ClientPlaySessionHandler;
 import com.velocitypowered.proxy.connection.client.ClientEntityIds;
+import com.velocitypowered.proxy.connection.client.ClientPlaySessionHandler;
 import com.velocitypowered.proxy.connection.client.ConnectedPlayer;
 import com.velocitypowered.proxy.protocol.packet.EntityCameraPacket;
 import com.velocitypowered.proxy.protocol.packet.RemoveEntitiesPacket;
@@ -55,7 +60,8 @@ class SeamlessPlayerIdentityTest {
     assertEquals(java.util.Set.of(9), tracked);
     assertFalse(handler.handle(new RemoveEntitiesPacket(List.of(9))));
     assertTrue(tracked.isEmpty());
-    var camera = new EntityCameraPacket(); camera.setEntityId(27);
+    var camera = new EntityCameraPacket();
+    camera.setEntityId(27);
     assertFalse(handler.handle(camera));
     assertEquals(ClientEntityIds.SELF, camera.getEntityId());
     var attemptedSelf = mock(SpawnEntityPacket.class);
@@ -70,9 +76,13 @@ class SeamlessPlayerIdentityTest {
 
   @Test
   void onlySupportedClientsUseTheReservedFrontendPlayerId() {
-    for (var version : new ProtocolVersion[]{ProtocolVersion.MINECRAFT_1_21_11,
-        ProtocolVersion.MINECRAFT_26_1, ProtocolVersion.MINECRAFT_26_2,
-        ProtocolVersion.MINECRAFT_26_3}) {
+    for (var version :
+        new ProtocolVersion[] {
+          ProtocolVersion.MINECRAFT_1_21_11,
+          ProtocolVersion.MINECRAFT_26_1,
+          ProtocolVersion.MINECRAFT_26_2,
+          ProtocolVersion.MINECRAFT_26_3
+        }) {
       assertEquals(ClientEntityIds.SELF, ClientEntityIds.forJoin(version, 9));
     }
     assertEquals(9, ClientEntityIds.forJoin(ProtocolVersion.MINECRAFT_1_20_2, 9));

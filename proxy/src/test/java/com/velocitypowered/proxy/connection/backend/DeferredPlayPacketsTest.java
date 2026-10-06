@@ -17,7 +17,9 @@
 
 package com.velocitypowered.proxy.connection.backend;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+
 import com.velocitypowered.proxy.connection.MinecraftSessionHandler;
 import com.velocitypowered.proxy.protocol.MinecraftPacket;
 import com.velocitypowered.proxy.protocol.packet.EntityIdPayloadPacket;
@@ -41,27 +43,33 @@ class DeferredPlayPacketsTest {
     held.add(new GameEventPacket(13, 0));
     world.release(); // MinecraftConnection releases the original network-read ownership.
     List<String> seen = new ArrayList<>();
-    held.replay(new MinecraftSessionHandler() {
-      public boolean handle(EntityIdPayloadPacket packet) {
-        packet.setEntityId(Integer.MAX_VALUE);
-        seen.add("rewrite");
-        return false;
-      }
-      public boolean handle(GameEventPacket packet) {
-        seen.add("suppressed-loading");
-        return true;
-      }
-      public void handleGeneric(MinecraftPacket packet) {
-        seen.add("forward:" + ((EntityIdPayloadPacket) packet).getEntityId());
-      }
-      public void handleUnknown(ByteBuf buf) {
-        seen.add("chunk:" + buf.readInt());
-      }
-      public void readCompleted() {
-        seen.add("flush");
-      }
-    });
-    assertEquals(List.of("rewrite", "forward:2147483647", "chunk:123", "suppressed-loading", "flush"), seen);
+    held.replay(
+        new MinecraftSessionHandler() {
+          public boolean handle(EntityIdPayloadPacket packet) {
+            packet.setEntityId(Integer.MAX_VALUE);
+            seen.add("rewrite");
+            return false;
+          }
+
+          public boolean handle(GameEventPacket packet) {
+            seen.add("suppressed-loading");
+            return true;
+          }
+
+          public void handleGeneric(MinecraftPacket packet) {
+            seen.add("forward:" + ((EntityIdPayloadPacket) packet).getEntityId());
+          }
+
+          public void handleUnknown(ByteBuf buf) {
+            seen.add("chunk:" + buf.readInt());
+          }
+
+          public void readCompleted() {
+            seen.add("flush");
+          }
+        });
+    assertEquals(
+        List.of("rewrite", "forward:2147483647", "chunk:123", "suppressed-loading", "flush"), seen);
     assertEquals(0, world.refCnt());
   }
 
@@ -81,13 +89,19 @@ class DeferredPlayPacketsTest {
     var held = new DeferredPlayPackets();
     ByteBuf first = Unpooled.buffer().writeByte(1);
     ByteBuf second = Unpooled.buffer().writeByte(2);
-    held.add(first); held.add(second);
-    first.release(); second.release();
-    assertThrows(IllegalStateException.class, () -> held.replay(new MinecraftSessionHandler() {
-      public void handleUnknown(ByteBuf packet) {
-        throw new IllegalStateException("closed");
-      }
-    }));
+    held.add(first);
+    held.add(second);
+    first.release();
+    second.release();
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            held.replay(
+                new MinecraftSessionHandler() {
+                  public void handleUnknown(ByteBuf packet) {
+                    throw new IllegalStateException("closed");
+                  }
+                }));
     assertEquals(0, first.refCnt());
     assertEquals(0, second.refCnt());
   }

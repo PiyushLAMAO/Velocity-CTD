@@ -35,6 +35,7 @@ import com.velocitypowered.api.proxy.player.ResourcePackInfo;
 import com.velocitypowered.proxy.VelocityServer;
 import com.velocitypowered.proxy.connection.MinecraftConnection;
 import com.velocitypowered.proxy.connection.MinecraftSessionHandler;
+import com.velocitypowered.proxy.connection.client.ClientEntityIds;
 import com.velocitypowered.proxy.connection.client.ClientPlaySessionHandler;
 import com.velocitypowered.proxy.connection.client.ConnectedPlayer;
 import com.velocitypowered.proxy.connection.player.resourcepack.VelocityResourcePackInfo;
@@ -42,9 +43,8 @@ import com.velocitypowered.proxy.connection.player.resourcepack.handler.Resource
 import com.velocitypowered.proxy.connection.util.ConnectionMessages;
 import com.velocitypowered.proxy.protocol.MinecraftPacket;
 import com.velocitypowered.proxy.protocol.StateRegistry;
-import com.velocitypowered.proxy.protocol.netty.MinecraftDecoder;
-import com.velocitypowered.proxy.protocol.netty.ProxyJoinPacketQueue;
 import com.velocitypowered.proxy.protocol.netty.MinecraftVarintFrameDecoder;
+import com.velocitypowered.proxy.protocol.netty.ProxyJoinPacketQueue;
 import com.velocitypowered.proxy.protocol.packet.AvailableCommandsPacket;
 import com.velocitypowered.proxy.protocol.packet.BossBarPacket;
 import com.velocitypowered.proxy.protocol.packet.BundleDelimiterPacket;
@@ -56,9 +56,8 @@ import com.velocitypowered.proxy.protocol.packet.DisconnectPacket;
 import com.velocitypowered.proxy.protocol.packet.EntityEffectPacket;
 import com.velocitypowered.proxy.protocol.packet.EntityEventPacket;
 import com.velocitypowered.proxy.protocol.packet.EntityIdPayloadPacket;
-import com.velocitypowered.proxy.protocol.packet.GameEventPacket;
 import com.velocitypowered.proxy.protocol.packet.ForgetChunkPacket;
-import com.velocitypowered.proxy.connection.client.ClientEntityIds;
+import com.velocitypowered.proxy.protocol.packet.GameEventPacket;
 import com.velocitypowered.proxy.protocol.packet.HeaderAndFooterPacket;
 import com.velocitypowered.proxy.protocol.packet.JoinGamePacket;
 import com.velocitypowered.proxy.protocol.packet.KeepAlivePacket;
@@ -96,18 +95,18 @@ import net.kyori.adventure.key.Key;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-/**
- * Handles a connected player.
- */
+/** Handles a connected player. */
 public class BackendPlaySessionHandler implements MinecraftSessionHandler {
 
   private static final Pattern PLAUSIBLE_SHA1_HASH = Pattern.compile("^[a-z0-9]{40}$");
 
   private static final Logger LOGGER = LogManager.getLogger(BackendPlaySessionHandler.class);
 
-  private static final boolean BACKPRESSURE_LOG = Boolean.getBoolean("velocity.log-server-backpressure");
+  private static final boolean BACKPRESSURE_LOG =
+      Boolean.getBoolean("velocity.log-server-backpressure");
 
-  private static final int MAXIMUM_PACKETS_TO_FLUSH = Integer.getInteger("velocity.max-packets-per-flush", 8192);
+  private static final int MAXIMUM_PACKETS_TO_FLUSH =
+      Integer.getInteger("velocity.max-packets-per-flush", 8192);
 
   private static final int LARGE_PACKET_THRESHOLD = 1024 * 128;
 
@@ -131,8 +130,8 @@ public class BackendPlaySessionHandler implements MinecraftSessionHandler {
     }
     this.playerSessionHandler = (ClientPlaySessionHandler) psh;
 
-    this.bungeecordMessageResponder = new BungeeCordMessageResponder(server,
-        serverConn.getPlayer());
+    this.bungeecordMessageResponder =
+        new BungeeCordMessageResponder(server, serverConn.getPlayer());
   }
 
   @Override
@@ -141,11 +140,11 @@ public class BackendPlaySessionHandler implements MinecraftSessionHandler {
 
     MinecraftConnection serverMc = serverConn.ensureConnected();
     if (server.getConfiguration().isBungeePluginChannelEnabled()) {
-      serverMc.write(PluginMessageUtil.constructChannelsPacket(serverMc.getProtocolVersion(),
-          ImmutableList.of(getBungeeCordChannel(serverMc.getProtocolVersion()))
-      ));
+      serverMc.write(
+          PluginMessageUtil.constructChannelsPacket(
+              serverMc.getProtocolVersion(),
+              ImmutableList.of(getBungeeCordChannel(serverMc.getProtocolVersion()))));
     }
-
   }
 
   @Override
@@ -169,7 +168,10 @@ public class BackendPlaySessionHandler implements MinecraftSessionHandler {
     MinecraftConnection smc = serverConn.ensureConnected();
     smc.setAutoReading(false);
     // MinecraftDecoder switched to CONFIG when it decoded this packet
-    smc.getChannel().pipeline().get(MinecraftVarintFrameDecoder.class).setState(StateRegistry.CONFIG);
+    smc.getChannel()
+        .pipeline()
+        .get(MinecraftVarintFrameDecoder.class)
+        .setState(StateRegistry.CONFIG);
     serverConn.getPlayer().switchToConfigState();
     return true;
   }
@@ -217,8 +219,10 @@ public class BackendPlaySessionHandler implements MinecraftSessionHandler {
   public boolean handle(SpawnEntityPacket packet) {
     Integer self = playerSessionHandler.getClientEntityId();
     Integer backendSelf = serverConn.getEntityId();
-    if (self != null && self == ClientEntityIds.SELF
-        && (packet.getEntityId() == self || backendSelf != null && packet.getEntityId() == backendSelf)) {
+    if (self != null
+        && self == ClientEntityIds.SELF
+        && (packet.getEntityId() == self
+            || backendSelf != null && packet.getEntityId() == backendSelf)) {
       // A backend must never replace the retained local player's entity.
       return true;
     }
@@ -330,12 +334,12 @@ public class BackendPlaySessionHandler implements MinecraftSessionHandler {
 
   @Override
   public boolean handle(final ResourcePackRequestPacket packet) {
-    final ResourcePackInfo.Builder builder = new VelocityResourcePackInfo.BuilderImpl(
-        Preconditions.checkNotNull(packet.getUrl()))
-        .setId(packet.getId())
-        .setPrompt(packet.getPrompt() == null ? null : packet.getPrompt().getComponent())
-        .setShouldForce(packet.isRequired())
-        .setOrigin(ResourcePackInfo.Origin.DOWNSTREAM_SERVER);
+    final ResourcePackInfo.Builder builder =
+        new VelocityResourcePackInfo.BuilderImpl(Preconditions.checkNotNull(packet.getUrl()))
+            .setId(packet.getId())
+            .setPrompt(packet.getPrompt() == null ? null : packet.getPrompt().getComponent())
+            .setShouldForce(packet.isRequired())
+            .setOrigin(ResourcePackInfo.Origin.DOWNSTREAM_SERVER);
 
     final String hash = packet.getHash();
     if (hash != null && !hash.isEmpty()) {
@@ -345,86 +349,128 @@ public class BackendPlaySessionHandler implements MinecraftSessionHandler {
     }
 
     final ResourcePackInfo resourcePackInfo = builder.build();
-    final ServerResourcePackSendEvent event = new ServerResourcePackSendEvent(
-            resourcePackInfo, this.serverConn);
-    server.getEventManager().fire(event).thenAcceptAsync(serverResourcePackSendEvent -> {
-      if (playerConnection.isClosed()) {
-        return;
-      }
-      if (serverResourcePackSendEvent.getResult().isAllowed()) {
-        final ResourcePackInfo toSend = serverResourcePackSendEvent.getProvidedResourcePack();
-        boolean modifiedPack = false;
-        if (toSend != serverResourcePackSendEvent.getReceivedResourcePack()) {
-          ((VelocityResourcePackInfo) toSend)
-              .setOriginalOrigin(ResourcePackInfo.Origin.DOWNSTREAM_SERVER);
-          modifiedPack = true;
-        }
-        if (serverConn.getPlayer().resourcePackHandler().hasPackAppliedByHash(toSend.getHash())) {
-          // Do not apply a resource pack that has already been applied
-          if (serverConn.getConnection() != null) {
-            serverConn.getConnection().write(new ResourcePackResponsePacket(
-                    packet.getId(), packet.getHash(), PlayerResourcePackStatusEvent.Status.ACCEPTED));
-            if (serverConn.getConnection().getProtocolVersion().noLessThan(ProtocolVersion.MINECRAFT_1_20_3)) {
-              serverConn.getConnection().write(new ResourcePackResponsePacket(
-                  packet.getId(), packet.getHash(),
-                  PlayerResourcePackStatusEvent.Status.DOWNLOADED));
-            }
-            serverConn.getConnection().write(new ResourcePackResponsePacket(
-                packet.getId(), packet.getHash(),
-                PlayerResourcePackStatusEvent.Status.SUCCESSFUL));
-          }
-          if (modifiedPack) {
-            LOGGER.warn("A plugin has tried to modify a ResourcePack provided by the backend server "
-                    + "with a ResourcePack already applied, the applying of the resource pack will be skipped.");
-          }
-        } else {
-          serverConn.getPlayer().resourcePackHandler().queueResourcePack(toSend);
-        }
-      } else if (serverConn.getConnection() != null) {
-        serverConn.getConnection().write(new ResourcePackResponsePacket(
-            packet.getId(),
-            packet.getHash(),
-            PlayerResourcePackStatusEvent.Status.DECLINED
-        ));
-      }
-    }, playerConnection.eventLoop()).exceptionally((ex) -> {
-      if (serverConn.getConnection() != null) {
-        serverConn.getConnection().write(new ResourcePackResponsePacket(
-            packet.getId(),
-            packet.getHash(),
-            PlayerResourcePackStatusEvent.Status.DECLINED
-        ));
-      }
+    final ServerResourcePackSendEvent event =
+        new ServerResourcePackSendEvent(resourcePackInfo, this.serverConn);
+    server
+        .getEventManager()
+        .fire(event)
+        .thenAcceptAsync(
+            serverResourcePackSendEvent -> {
+              if (playerConnection.isClosed()) {
+                return;
+              }
+              if (serverResourcePackSendEvent.getResult().isAllowed()) {
+                final ResourcePackInfo toSend =
+                    serverResourcePackSendEvent.getProvidedResourcePack();
+                boolean modifiedPack = false;
+                if (toSend != serverResourcePackSendEvent.getReceivedResourcePack()) {
+                  ((VelocityResourcePackInfo) toSend)
+                      .setOriginalOrigin(ResourcePackInfo.Origin.DOWNSTREAM_SERVER);
+                  modifiedPack = true;
+                }
+                if (serverConn
+                    .getPlayer()
+                    .resourcePackHandler()
+                    .hasPackAppliedByHash(toSend.getHash())) {
+                  // Do not apply a resource pack that has already been applied
+                  if (serverConn.getConnection() != null) {
+                    serverConn
+                        .getConnection()
+                        .write(
+                            new ResourcePackResponsePacket(
+                                packet.getId(),
+                                packet.getHash(),
+                                PlayerResourcePackStatusEvent.Status.ACCEPTED));
+                    if (serverConn
+                        .getConnection()
+                        .getProtocolVersion()
+                        .noLessThan(ProtocolVersion.MINECRAFT_1_20_3)) {
+                      serverConn
+                          .getConnection()
+                          .write(
+                              new ResourcePackResponsePacket(
+                                  packet.getId(),
+                                  packet.getHash(),
+                                  PlayerResourcePackStatusEvent.Status.DOWNLOADED));
+                    }
+                    serverConn
+                        .getConnection()
+                        .write(
+                            new ResourcePackResponsePacket(
+                                packet.getId(),
+                                packet.getHash(),
+                                PlayerResourcePackStatusEvent.Status.SUCCESSFUL));
+                  }
+                  if (modifiedPack) {
+                    LOGGER.warn(
+                        "A plugin has tried to modify a ResourcePack provided by the backend server"
+                            + " with a ResourcePack already applied, the applying of the resource"
+                            + " pack will be skipped.");
+                  }
+                } else {
+                  serverConn.getPlayer().resourcePackHandler().queueResourcePack(toSend);
+                }
+              } else if (serverConn.getConnection() != null) {
+                serverConn
+                    .getConnection()
+                    .write(
+                        new ResourcePackResponsePacket(
+                            packet.getId(),
+                            packet.getHash(),
+                            PlayerResourcePackStatusEvent.Status.DECLINED));
+              }
+            },
+            playerConnection.eventLoop())
+        .exceptionally(
+            (ex) -> {
+              if (serverConn.getConnection() != null) {
+                serverConn
+                    .getConnection()
+                    .write(
+                        new ResourcePackResponsePacket(
+                            packet.getId(),
+                            packet.getHash(),
+                            PlayerResourcePackStatusEvent.Status.DECLINED));
+              }
 
-      LOGGER.error("Exception while handling resource pack send for {}", playerConnection, ex);
-      return null;
-    });
+              LOGGER.error(
+                  "Exception while handling resource pack send for {}", playerConnection, ex);
+              return null;
+            });
 
     return true;
   }
 
   @Override
   public boolean handle(RemoveResourcePackPacket packet) {
-    final ServerResourcePackRemoveEvent event = new ServerResourcePackRemoveEvent(
-            packet.getId(), this.serverConn);
-    server.getEventManager().fire(event).thenAcceptAsync(serverResourcePackRemoveEvent -> {
-      if (playerConnection.isClosed()) {
-        return;
-      }
-      if (serverResourcePackRemoveEvent.getResult().isAllowed()) {
-        final ConnectedPlayer player = serverConn.getPlayer();
-        final ResourcePackHandler handler = player.resourcePackHandler();
-        if (packet.getId() != null) {
-          handler.remove(packet.getId());
-        } else {
-          handler.clearAppliedResourcePacks();
-        }
-        playerConnection.write(packet);
-      }
-    }, playerConnection.eventLoop()).exceptionally((ex) -> {
-      LOGGER.error("Exception while handling resource pack remove for {}", playerConnection, ex);
-      return null;
-    });
+    final ServerResourcePackRemoveEvent event =
+        new ServerResourcePackRemoveEvent(packet.getId(), this.serverConn);
+    server
+        .getEventManager()
+        .fire(event)
+        .thenAcceptAsync(
+            serverResourcePackRemoveEvent -> {
+              if (playerConnection.isClosed()) {
+                return;
+              }
+              if (serverResourcePackRemoveEvent.getResult().isAllowed()) {
+                final ConnectedPlayer player = serverConn.getPlayer();
+                final ResourcePackHandler handler = player.resourcePackHandler();
+                if (packet.getId() != null) {
+                  handler.remove(packet.getId());
+                } else {
+                  handler.clearAppliedResourcePacks();
+                }
+                playerConnection.write(packet);
+              }
+            },
+            playerConnection.eventLoop())
+        .exceptionally(
+            (ex) -> {
+              LOGGER.error(
+                  "Exception while handling resource pack remove for {}", playerConnection, ex);
+              return null;
+            });
     return true;
   }
 
@@ -434,8 +480,8 @@ public class BackendPlaySessionHandler implements MinecraftSessionHandler {
         && ProxyJoinPacketQueue.READY_CHANNEL.equals(packet.getChannel())) {
       if (packet.content().readableBytes() == 1
           && packet.content().getByte(packet.content().readerIndex()) == 1) {
-        var context = serverConn.ensureConnected().getChannel().pipeline()
-            .context(ProxyJoinPacketQueue.NAME);
+        var context =
+            serverConn.ensureConnected().getChannel().pipeline().context(ProxyJoinPacketQueue.NAME);
         if (context != null) {
           ((ProxyJoinPacketQueue) context.handler()).proxyReady(context);
         }
@@ -453,14 +499,17 @@ public class BackendPlaySessionHandler implements MinecraftSessionHandler {
     }
 
     if (PluginMessageUtil.isMcBrand(packet)) {
-      PluginMessagePacket rewritten = PluginMessageUtil.rewriteMinecraftBrand(packet,
-          server.getVersion(),
-          playerConnection.getProtocolVersion(),
-          server.getConfiguration().getServerBrand(),
-          server.getConfiguration().getProxyBrandCustom(),
-          server.getConfiguration().getBackendBrandCustom(),
-          serverConn.getServer().getServerInfo().getName(),
-          ProtocolVersion.getVersionByName(server.getConfiguration().getMinimumVersion()).getVersionIntroducedIn());
+      PluginMessagePacket rewritten =
+          PluginMessageUtil.rewriteMinecraftBrand(
+              packet,
+              server.getVersion(),
+              playerConnection.getProtocolVersion(),
+              server.getConfiguration().getServerBrand(),
+              server.getConfiguration().getProxyBrandCustom(),
+              server.getConfiguration().getBackendBrandCustom(),
+              serverConn.getServer().getServerInfo().getName(),
+              ProtocolVersion.getVersionByName(server.getConfiguration().getMinimumVersion())
+                  .getVersionIntroducedIn());
       playerConnection.write(rewritten);
       return true;
     }
@@ -477,16 +526,23 @@ public class BackendPlaySessionHandler implements MinecraftSessionHandler {
 
     byte[] copy = ByteBufUtil.getBytes(packet.content());
     PluginMessageEvent event = new PluginMessageEvent(serverConn, serverConn.getPlayer(), id, copy);
-    server.getEventManager().fire(event).thenAcceptAsync(pme -> {
-      if (pme.getResult().isAllowed() && !playerConnection.isClosed()) {
-        PluginMessagePacket copied = new PluginMessagePacket(
-                packet.getChannel(), Unpooled.wrappedBuffer(copy));
-        playerConnection.write(copied);
-      }
-    }, playerConnection.eventLoop()).exceptionally((ex) -> {
-      LOGGER.error("Exception while handling plugin message {}", packet, ex);
-      return null;
-    });
+    server
+        .getEventManager()
+        .fire(event)
+        .thenAcceptAsync(
+            pme -> {
+              if (pme.getResult().isAllowed() && !playerConnection.isClosed()) {
+                PluginMessagePacket copied =
+                    new PluginMessagePacket(packet.getChannel(), Unpooled.wrappedBuffer(copy));
+                playerConnection.write(copied);
+              }
+            },
+            playerConnection.eventLoop())
+        .exceptionally(
+            (ex) -> {
+              LOGGER.error("Exception while handling plugin message {}", packet, ex);
+              return null;
+            });
     return true;
   }
 
@@ -494,8 +550,8 @@ public class BackendPlaySessionHandler implements MinecraftSessionHandler {
   public boolean handle(TabCompleteResponsePacket packet) {
     if (serverConn.getProxyAdmission() != null
         && packet.getTransactionId() == ProxyJoinPacketQueue.PROBE_TRANSACTION) {
-      var context = serverConn.ensureConnected().getChannel().pipeline()
-          .context(ProxyJoinPacketQueue.NAME);
+      var context =
+          serverConn.ensureConnected().getChannel().pipeline().context(ProxyJoinPacketQueue.NAME);
       if (context != null) {
         ((ProxyJoinPacketQueue) context.handler()).complete(context);
       }
@@ -509,9 +565,10 @@ public class BackendPlaySessionHandler implements MinecraftSessionHandler {
   public boolean handle(HeaderAndFooterPacket packet) {
     // Snoop the backend's player list header/footer so the proxy's tracked values stay in sync
     // with what the player actually sees.
-    serverConn.getPlayer().setPlayerListHeaderAndFooterSilent(
-        packet.getHeader().getComponent(),
-        packet.getFooter().getComponent());
+    serverConn
+        .getPlayer()
+        .setPlayerListHeaderAndFooterSilent(
+            packet.getHeader().getComponent(), packet.getFooter().getComponent());
     return false;
   }
 
@@ -542,15 +599,25 @@ public class BackendPlaySessionHandler implements MinecraftSessionHandler {
 
   @Override
   public boolean handle(ServerDataPacket packet) {
-    server.getServerListPingHandler().getInitialPing(this.serverConn.getPlayer()).thenComposeAsync(
-        ping -> server.getEventManager()
-            .fire(new ProxyPingEvent(this.serverConn.getPlayer(), ping)),
-        playerConnection.eventLoop()).thenAcceptAsync(pingEvent -> this.playerConnection.write(
-            new ServerDataPacket(new ComponentHolder(
-                this.serverConn.ensureConnected().getProtocolVersion(),
-                pingEvent.getPing().getDescriptionComponent()),
-                pingEvent.getPing().getFavicon().orElse(null), packet.isSecureChatEnforced())),
-        playerConnection.eventLoop());
+    server
+        .getServerListPingHandler()
+        .getInitialPing(this.serverConn.getPlayer())
+        .thenComposeAsync(
+            ping ->
+                server
+                    .getEventManager()
+                    .fire(new ProxyPingEvent(this.serverConn.getPlayer(), ping)),
+            playerConnection.eventLoop())
+        .thenAcceptAsync(
+            pingEvent ->
+                this.playerConnection.write(
+                    new ServerDataPacket(
+                        new ComponentHolder(
+                            this.serverConn.ensureConnected().getProtocolVersion(),
+                            pingEvent.getPing().getDescriptionComponent()),
+                        pingEvent.getPing().getFavicon().orElse(null),
+                        packet.isSecureChatEnforced())),
+            playerConnection.eventLoop());
     return true;
   }
 
@@ -558,55 +625,73 @@ public class BackendPlaySessionHandler implements MinecraftSessionHandler {
   public boolean handle(TransferPacket packet) {
     final InetSocketAddress originalAddress = packet.address();
     if (originalAddress == null) {
-      LOGGER.error("""
+      LOGGER.error(
+          """
           Unexpected nullable address received in TransferPacket \
-          from Backend Server in Play State""");
+          from Backend Server in Play State\
+          """);
       return true;
     }
-    this.server.getEventManager()
+    this.server
+        .getEventManager()
         .fire(new PreTransferEvent(this.serverConn.getPlayer(), originalAddress))
-        .thenAcceptAsync(event -> {
-          if (event.getResult().isAllowed()) {
-            InetSocketAddress resultedAddress = event.getResult().address();
-            if (resultedAddress == null) {
-              resultedAddress = originalAddress;
-            }
-            this.playerConnection.write(new TransferPacket(
-                    resultedAddress.getHostName(), resultedAddress.getPort()));
-          }
-        }, playerConnection.eventLoop());
+        .thenAcceptAsync(
+            event -> {
+              if (event.getResult().isAllowed()) {
+                InetSocketAddress resultedAddress = event.getResult().address();
+                if (resultedAddress == null) {
+                  resultedAddress = originalAddress;
+                }
+                this.playerConnection.write(
+                    new TransferPacket(resultedAddress.getHostName(), resultedAddress.getPort()));
+              }
+            },
+            playerConnection.eventLoop());
     return true;
   }
 
   @Override
   public boolean handle(ClientboundStoreCookiePacket packet) {
-    server.getEventManager()
+    server
+        .getEventManager()
         .fire(new CookieStoreEvent(serverConn.getPlayer(), packet.getKey(), packet.getPayload()))
-        .thenAcceptAsync(event -> {
-          if (event.getResult().isAllowed()) {
-            final Key resultedKey = event.getResult().getKey() == null
-                ? event.getOriginalKey() : event.getResult().getKey();
-            final byte[] resultedData = event.getResult().getData() == null
-                ? event.getOriginalData() : event.getResult().getData();
+        .thenAcceptAsync(
+            event -> {
+              if (event.getResult().isAllowed()) {
+                final Key resultedKey =
+                    event.getResult().getKey() == null
+                        ? event.getOriginalKey()
+                        : event.getResult().getKey();
+                final byte[] resultedData =
+                    event.getResult().getData() == null
+                        ? event.getOriginalData()
+                        : event.getResult().getData();
 
-            playerConnection.write(new ClientboundStoreCookiePacket(resultedKey, resultedData));
-          }
-        }, playerConnection.eventLoop());
+                playerConnection.write(new ClientboundStoreCookiePacket(resultedKey, resultedData));
+              }
+            },
+            playerConnection.eventLoop());
 
     return true;
   }
 
   @Override
   public boolean handle(ClientboundCookieRequestPacket packet) {
-    server.getEventManager().fire(new CookieRequestEvent(serverConn.getPlayer(), packet.getKey()))
-        .thenAcceptAsync(event -> {
-          if (event.getResult().isAllowed()) {
-            final Key resultedKey = event.getResult().getKey() == null
-                ? event.getOriginalKey() : event.getResult().getKey();
+    server
+        .getEventManager()
+        .fire(new CookieRequestEvent(serverConn.getPlayer(), packet.getKey()))
+        .thenAcceptAsync(
+            event -> {
+              if (event.getResult().isAllowed()) {
+                final Key resultedKey =
+                    event.getResult().getKey() == null
+                        ? event.getOriginalKey()
+                        : event.getResult().getKey();
 
-            playerConnection.write(new ClientboundCookieRequestPacket(resultedKey));
-          }
-        }, playerConnection.eventLoop());
+                playerConnection.write(new ClientboundCookieRequestPacket(resultedKey));
+              }
+            },
+            playerConnection.eventLoop());
 
     return true;
   }
@@ -631,7 +716,9 @@ public class BackendPlaySessionHandler implements MinecraftSessionHandler {
     if (packet instanceof PluginMessagePacket pluginMessage) {
       pluginMessage.retain();
     }
-    boolean huge = packet instanceof DeferredByteBufHolder def && def.content().readableBytes() > LARGE_PACKET_THRESHOLD;
+    boolean huge =
+        packet instanceof DeferredByteBufHolder def
+            && def.content().readableBytes() > LARGE_PACKET_THRESHOLD;
     playerConnection.delayedWrite(packet);
     if (huge || ++packetsFlushed >= MAXIMUM_PACKETS_TO_FLUSH) {
       playerConnection.flush();
@@ -643,9 +730,12 @@ public class BackendPlaySessionHandler implements MinecraftSessionHandler {
   public void handleUnknown(ByteBuf buf) {
     playerSessionHandler.getWorldChunks().observe(buf, playerConnection.getProtocolVersion());
     // Entity sounds are encode-only packets in Velocity and arrive here as raw frames.
-    ByteBuf rewritten = BackendSoundEntityRewriter.rewrite(buf,
-        playerConnection.getProtocolVersion(), serverConn.getEntityId(),
-        playerSessionHandler.getClientEntityId());
+    ByteBuf rewritten =
+        BackendSoundEntityRewriter.rewrite(
+            buf,
+            playerConnection.getProtocolVersion(),
+            serverConn.getEntityId(),
+            playerSessionHandler.getClientEntityId());
     ByteBuf outgoing = rewritten == null ? buf.retain() : rewritten;
     boolean huge = outgoing.readableBytes() > LARGE_PACKET_THRESHOLD;
     playerConnection.delayedWrite(outgoing);
@@ -664,8 +754,9 @@ public class BackendPlaySessionHandler implements MinecraftSessionHandler {
   @Override
   public void exception(Throwable throwable) {
     exceptionTriggered = true;
-    boolean safe = !(throwable instanceof TimeoutException)
-        || server.getConfiguration().isFailoverOnUnexpectedServerDisconnect();
+    boolean safe =
+        !(throwable instanceof TimeoutException)
+            || server.getConfiguration().isFailoverOnUnexpectedServerDisconnect();
     serverConn.getPlayer().handleConnectionException(serverConn.getServer(), throwable, safe);
   }
 
@@ -678,10 +769,15 @@ public class BackendPlaySessionHandler implements MinecraftSessionHandler {
     serverConn.getServer().removePlayer(serverConn.getPlayer());
     if (!serverConn.isGracefulDisconnect() && !exceptionTriggered) {
       if (server.getConfiguration().isFailoverOnUnexpectedServerDisconnect()) {
-        serverConn.getPlayer().handleConnectionException(serverConn.getServer(),
-            DisconnectPacket.create(ConnectionMessages.INTERNAL_SERVER_CONNECTION_ERROR,
-                serverConn.getPlayer().getProtocolVersion(),
-                    serverConn.getPlayer().getConnection().getState()), true);
+        serverConn
+            .getPlayer()
+            .handleConnectionException(
+                serverConn.getServer(),
+                DisconnectPacket.create(
+                    ConnectionMessages.INTERNAL_SERVER_CONNECTION_ERROR,
+                    serverConn.getPlayer().getProtocolVersion(),
+                    serverConn.getPlayer().getConnection().getState()),
+                true);
       } else {
         serverConn.getPlayer().disconnect(ConnectionMessages.INTERNAL_SERVER_CONNECTION_ERROR);
       }

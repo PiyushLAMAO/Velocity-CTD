@@ -28,10 +28,15 @@ class ProxyRouteTargetsTest {
   @Test
   void permitsOnlyConfiguredRemoteHostAndPort() {
     List<String> targets = List.of("167.104.101.158:25212");
-    assertTrue(ProxyRouteTargets.isAllowed(new InetSocketAddress("167.104.101.158",25212),targets));
-    assertFalse(ProxyRouteTargets.isAllowed(new InetSocketAddress("167.104.101.158",25213),targets));
-    assertFalse(ProxyRouteTargets.isAllowed(new InetSocketAddress("167.104.101.146",25212),targets));
-    assertFalse(ProxyRouteTargets.isAllowed(InetSocketAddress.createUnresolved("167.104.101.158",25212),targets));
-    assertTrue(ProxyRouteTargets.isAllowed(new InetSocketAddress("127.0.0.1",25690),List.of()));
+    assertTrue(
+        ProxyRouteTargets.isAllowed(new InetSocketAddress("167.104.101.158", 25212), targets));
+    assertFalse(
+        ProxyRouteTargets.isAllowed(new InetSocketAddress("167.104.101.158", 25213), targets));
+    assertFalse(
+        ProxyRouteTargets.isAllowed(new InetSocketAddress("167.104.101.146", 25212), targets));
+    assertFalse(
+        ProxyRouteTargets.isAllowed(
+            InetSocketAddress.createUnresolved("167.104.101.158", 25212), targets));
+    assertTrue(ProxyRouteTargets.isAllowed(new InetSocketAddress("127.0.0.1", 25690), List.of()));
   }
 }
